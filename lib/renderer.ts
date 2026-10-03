@@ -1,6 +1,7 @@
 import type { MoltbotAgent, District } from "./types"
 import { DISTRICTS } from "./data"
 import { ACCESSORIES } from "./cosmetics"
+import { getRobotDrawSize, type RobotSpriteSet } from "./robot-sprites"
 
 const PIXEL = 2
 
@@ -527,6 +528,63 @@ function drawBotSprite(
   drawAuraParticles(ctx, agent, tick, cx, drawY + spriteSize / 2, c)
 }
 
+/** One cell of a district robot strip (see lib/robot-sprites.ts). */
+export interface RobotFrame {
+  image: HTMLImageElement
+  set: Pick<RobotSpriteSet, "frames" | "frameWidth" | "frameHeight">
+  frame: number
+}
+
+/**
+ * Draws an untinted district robot cell. The art already carries the district
+ * palette, so unlike drawBotSprite there is no multiply tint or background keying.
+ * Feet sit on `feetY`, centered on `cx`. Returns the square box (side = sprite
+ * height, top = sprite top) used to anchor overlays such as hats and the crown.
+ */
+function drawRobotFrame(
+  ctx: CanvasRenderingContext2D,
+  agent: MoltbotAgent,
+  tick: number,
+  robot: RobotFrame,
+  opts: { cx: number; feetY: number; c: string },
+): { drawX: number; drawY: number; spriteSize: number } {
+  const { cx, feetY, c } = opts
+  const { width, height } = getRobotDrawSize(robot.set)
+  const left = Math.round(cx - width / 2)
+  const top = Math.round(feetY - height)
+  const frames = Math.max(1, robot.set.frames)
+  const cellW = Math.floor((robot.image.naturalWidth || robot.image.width) / frames) || robot.set.frameWidth
+  const cellH = robot.image.naturalHeight || robot.image.height || robot.set.frameHeight
+  const sx = (Math.max(0, robot.frame) % frames) * cellW
+
+  ctx.save()
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = "high"
+  if ((agent.appearance?.skin ?? "default") === "hologram") {
+    ctx.globalAlpha = 0.55 + Math.sin(tick * 0.1) * 0.15
+  }
+  if (agent.status === "offline") {
+    ctx.globalAlpha *= 0.55
+    ctx.filter = "grayscale(1) brightness(0.6)"
+  } else if (agent.status === "error" && Math.sin(tick * 0.2) > 0) {
+    ctx.filter = "drop-shadow(0 0 3px rgba(248,113,113,0.95))"
+  }
+  if (agent.direction === "left") {
+    ctx.translate(left + width, 0)
+    ctx.scale(-1, 1)
+    ctx.drawImage(robot.image, sx, 0, cellW, cellH, 0, top, width, height)
+  } else {
+    ctx.drawImage(robot.image, sx, 0, cellW, cellH, left, top, width, height)
+  }
+  ctx.restore()
+
+  const box = { drawX: Math.round(cx - height / 2), drawY: top, spriteSize: height }
+  drawSkinOverlay(ctx, agent, tick, box.drawX, box.drawY, box.spriteSize, c)
+  drawAccessories(ctx, agent, box.drawX, box.drawY, box.spriteSize)
+  drawAuraParticles(ctx, agent, tick, cx, top + height / 2, c)
+  return box
+}
+
 function drawAntennaWaves(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, tick: number, cx: number, drawY: number, c: string) {
   const antennaGlow = Math.sin(tick * 0.1) > 0
   if (antennaGlow) {
@@ -656,7 +714,7 @@ function drawCloudBadge(ctx: CanvasRenderingContext2D, drawX: number, drawY: num
   ctx.restore()
 }
 
-export function drawBot(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, tick: number, isSelected: boolean, sprite?: HTMLImageElement, cropRegion?: [number, number, number, number], colorBlindMode = false) {
+export function drawBot(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, tick: number, isSelected: boolean, sprite?: HTMLImageElement, cropRegion?: [number, number, number, number], colorBlindMode = false, robot?: RobotFrame) {
   const x = Math.round(agent.pixelX)
   const y = Math.round(agent.pixelY)
   const c = agent.color
@@ -722,7 +780,17 @@ export function drawBot(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, tick
   ctx.fillRect(drawX + 5, drawY + 5, spriteSize - 10, spriteSize - 7)
   ctx.restore()
 
-  if (sprite) {
+  // Overlay anchor: the legacy square box, or the district robot's own box.
+  let overlayX = drawX
+  let overlayY = drawY
+  let overlaySize = spriteSize
+  if (robot) {
+    // Feet land where the legacy 48px box put them, so labels and shadows stay put.
+    const box = drawRobotFrame(ctx, agent, tick, robot, { cx, feetY: drawY + spriteSize, c })
+    overlayX = box.drawX
+    overlayY = box.drawY
+    overlaySize = box.spriteSize
+  } else if (sprite) {
     drawBotSprite(ctx, agent, tick, sprite, cropRegion, { drawX, drawY, spriteSize, c, cx })
   } else {
     // Minimal fallback if sprite hasn't loaded
@@ -732,7 +800,7 @@ export function drawBot(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, tick
   }
 
   if (agent.status === "working") {
-    drawAntennaWaves(ctx, agent, tick, cx, drawY, c)
+    drawAntennaWaves(ctx, agent, tick, cx, overlayY, c)
   }
 
   if (agent.status === "offline") {
@@ -745,15 +813,15 @@ export function drawBot(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, tick
   if (globalRank && globalRank <= 3) {
     ctx.font = "bold 14px serif"
     ctx.textAlign = "center"
-    ctx.fillText("👑", cx, drawY - 4)
+    ctx.fillText("👑", cx, overlayY - 4)
     ctx.textAlign = "left"
   }
 
-  drawStatusDot(ctx, agent.status, drawX, drawY, spriteSize, colorBlindMode)
+  drawStatusDot(ctx, agent.status, overlayX, overlayY, overlaySize, colorBlindMode)
   drawNameLabel(ctx, agent.name, cx, y, spriteSize, c, agent.status)
 
   if (agent.deployment === "cloud") {
-    drawCloudBadge(ctx, drawX, drawY)
+    drawCloudBadge(ctx, overlayX, overlayY)
   }
 
   if (agent.status === "working" && agent.taskProgress > 0) {

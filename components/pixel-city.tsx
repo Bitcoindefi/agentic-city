@@ -8,6 +8,14 @@ import { drawGrid, drawRoads, drawDistrict, drawBot } from "@/lib/renderer"
 import type { DistrictStanding } from "@/lib/gamification/events"
 import { ParticleSystem, type ParticleEvent, type ParticleOpts } from "@/lib/renderer/particles"
 import type { CityAudioEngine } from "@/lib/audio/city-audio"
+import {
+  ROBOT_FRAME_MS,
+  ROBOT_SPRITE_SETS,
+  getDistrictRobot,
+  getRobotFrameIndex,
+  robotPhaseFor,
+  shouldAnimateRobot,
+} from "@/lib/robot-sprites"
 
 const BG_IMAGES: Record<string, string> = {
   "data-center": "/bg-data-center.jpg",
@@ -32,6 +40,8 @@ export interface FloatingOverlay {
   duration: number
 }
 
+// Legacy tinted sprite set. The map now draws the per-district robots from
+// lib/robot-sprites.ts; these stay as the fallback while (or if) a sheet fails to load.
 export const SPRITE_CONFIGS: SpriteConfig[] = [
   { path: "/sprites/robot-tv.gif" },
   { path: "/sprites/robot-tank.gif" },
@@ -198,6 +208,8 @@ export function PixelCity({
   const [images, setImages] = useState<Record<string, HTMLImageElement>>({})
   const [sprites, setSprites] = useState<HTMLImageElement[]>([])
   const spriteCrops = useRef<(([number, number, number, number]) | undefined)[]>([])
+  const [robotSheets, setRobotSheets] = useState<Record<string, HTMLImageElement>>({})
+  const [robotClock, setRobotClock] = useState(0)
   const [hoveredAgent, setHoveredAgent] = useState<MoltbotAgent | null>(null)
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null)
   const [focusedAgentId, setFocusedAgentId] = useState<string | null>(null)
@@ -338,6 +350,28 @@ export function PixelCity({
       img.src = cfg.path
     })
   }, [])
+
+  // District robot strips load independently so a slow sheet never blocks the map.
+  useEffect(() => {
+    let cancelled = false
+    for (const set of ROBOT_SPRITE_SETS) {
+      const img = new Image()
+      img.onload = () => {
+        if (!cancelled) setRobotSheets((prev) => ({ ...prev, [set.district]: img }))
+      }
+      img.src = set.sheet
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Walk-cycle clock for the robot strips. Skipped under reduced motion.
+  useEffect(() => {
+    if (reduceMotion || Object.keys(robotSheets).length === 0) return
+    const id = window.setInterval(() => setRobotClock(performance.now()), ROBOT_FRAME_MS)
+    return () => window.clearInterval(id)
+  }, [reduceMotion, robotSheets])
 
   const resizeCanvas = useCallback(() => {
     const canvas = canvasRef.current
@@ -507,7 +541,23 @@ export function PixelCity({
         leaderboardRank: topGlobalRanks.get(agent.id),
         isDistrictLeader: districtLeaderIds.has(agent.id),
       }
-      drawBot(ctx, enriched, tick, agent.id === selectedAgentId, agentSprite, crop, colorBlindMode)
+      const robotSet = getDistrictRobot(agent.district)
+      const robotImage = robotSheets[robotSet.district]
+      const isMoving = Math.hypot(agent.targetX - agent.pixelX, agent.targetY - agent.pixelY) > 1.5
+      const robot = robotImage
+        ? {
+            image: robotImage,
+            set: robotSet,
+            frame: getRobotFrameIndex(
+              robotClock,
+              robotSet.frames,
+              robotSet.frameMs,
+              shouldAnimateRobot(agent.status, isMoving, reduceMotion),
+              robotPhaseFor(agent.id),
+            ),
+          }
+        : undefined
+      drawBot(ctx, enriched, tick, agent.id === selectedAgentId, agentSprite, crop, colorBlindMode, robot)
     }
 
     if (!reduceMotion) {
@@ -550,7 +600,11 @@ export function PixelCity({
     if (showMinimap) {
       drawMinimap(ctx, w, h, districts, agents, zoom, panOffset, cityBounds, minimapScale, colorBlindMode)
     }
+  }, [agents, districts, selectedAgentId, tick, images, sprites, robotSheets, robotClock, txAnimations, reduceMotion, zoom, panOffset, showMinimap, cityBounds, minimapScale, colorBlindMode, districtStandings])
 
+  // District audio focus follows agent presence. Kept out of the draw effect so the
+  // robot walk clock (every ROBOT_FRAME_MS) does not keep rescheduling gain ramps.
+  useEffect(() => {
     if (audioEngine) {
       const weights = new Map<string, number>()
       for (const d of districts) weights.set(d.id, 0)
@@ -569,7 +623,7 @@ export function PixelCity({
         audioEngine.setDistrictFocus(d.id, volume)
       }
     }
-  }, [agents, districts, selectedAgentId, tick, images, sprites, txAnimations, reduceMotion, audioEngine, zoom, panOffset, showMinimap, cityBounds, minimapScale, colorBlindMode, districtStandings])
+  }, [agents, districts, audioEngine])
 
   const hitTestAgent = useCallback(
     (mx: number, my: number): MoltbotAgent | null => {
