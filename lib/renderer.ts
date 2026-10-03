@@ -1,7 +1,14 @@
 import type { MoltbotAgent, District } from "./types"
 import { DISTRICTS } from "./data"
 import { ACCESSORIES } from "./cosmetics"
-import { getRobotDrawSize, type RobotSpriteSet } from "./robot-sprites"
+import {
+  getRobotColorFilter,
+  getRobotDrawSize,
+  getRobotHeadAnchor,
+  getRobotSkinFilter,
+  type RobotRect,
+  type RobotSpriteSet,
+} from "./robot-sprites"
 
 const PIXEL = 2
 
@@ -348,6 +355,10 @@ function drawSkinOverlay(
   drawY: number,
   spriteSize: number,
   effectiveColor: string,
+  // Height of the sprite rect when it is not square (district robots).
+  spriteHeight = spriteSize,
+  // District robots get neon/chrome/gold tones as filters; only overlays remain here.
+  robotMode = false,
 ) {
   const skin = agent.appearance?.skin ?? "default"
   if (skin === "default" || skin === "legendary") return
@@ -383,7 +394,7 @@ function drawSkinOverlay(
     ctx.save()
     ctx.strokeStyle = "rgba(125,211,252,0.5)"
     ctx.lineWidth = 1
-    for (let ly = drawY; ly < drawY + spriteSize; ly += 3) {
+    for (let ly = drawY; ly < drawY + spriteHeight; ly += 3) {
       ctx.beginPath()
       ctx.moveTo(drawX, ly)
       ctx.lineTo(drawX + spriteSize, ly)
@@ -394,12 +405,14 @@ function drawSkinOverlay(
   }
 
   if (skin === "gold") {
-    ctx.save()
-    ctx.globalCompositeOperation = "multiply"
-    ctx.globalAlpha = 0.35
-    ctx.fillStyle = "#facc15"
-    ctx.fillRect(drawX, drawY, spriteSize, spriteSize)
-    ctx.restore()
+    if (!robotMode) {
+      ctx.save()
+      ctx.globalCompositeOperation = "multiply"
+      ctx.globalAlpha = 0.35
+      ctx.fillStyle = "#facc15"
+      ctx.fillRect(drawX, drawY, spriteSize, spriteHeight)
+      ctx.restore()
+    }
 
     const twinkle = Math.sin(tick * 0.2) > 0.3
     if (twinkle) {
@@ -407,8 +420,8 @@ function drawSkinOverlay(
       ctx.fillStyle = "#fde68a"
       ctx.fillRect(drawX - 1, drawY - 1, 2, 2)
       ctx.fillRect(drawX + spriteSize - 1, drawY - 1, 2, 2)
-      ctx.fillRect(drawX - 1, drawY + spriteSize - 1, 2, 2)
-      ctx.fillRect(drawX + spriteSize - 1, drawY + spriteSize - 1, 2, 2)
+      ctx.fillRect(drawX - 1, drawY + spriteHeight - 1, 2, 2)
+      ctx.fillRect(drawX + spriteSize - 1, drawY + spriteHeight - 1, 2, 2)
       ctx.restore()
     }
   }
@@ -422,6 +435,11 @@ function drawAccessories(
   drawY: number,
   spriteSize: number,
 ) {
+  drawAccessoryRow(ctx, agent, drawX + spriteSize / 2, drawY - 4)
+}
+
+// Accessory glyphs centered on (cx, y); district robots pass their head anchor.
+function drawAccessoryRow(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, cx: number, y: number) {
   const accessories = agent.appearance?.accessories ?? []
   if (accessories.length === 0) return
 
@@ -429,12 +447,11 @@ function drawAccessories(
   ctx.font = "10px sans-serif"
   ctx.textAlign = "center"
   ctx.textBaseline = "middle"
-  const cx = drawX + spriteSize / 2
   accessories.forEach((id, i) => {
     const def = ACCESSORIES.find((a) => a.id === id)
     if (!def) return
     const slotX = cx + (i - (accessories.length - 1) / 2) * 11
-    ctx.fillText(def.emoji, slotX, drawY - 4)
+    ctx.fillText(def.emoji, slotX, y)
   })
   ctx.restore()
 }
@@ -531,15 +548,21 @@ function drawBotSprite(
 /** One cell of a district robot strip (see lib/robot-sprites.ts). */
 export interface RobotFrame {
   image: HTMLImageElement
-  set: Pick<RobotSpriteSet, "frames" | "frameWidth" | "frameHeight">
+  set: Pick<RobotSpriteSet, "frames" | "frameWidth" | "frameHeight" | "accentHue" | "head">
   frame: number
 }
 
+/** Where a robot landed on screen, for anchoring the overlays drawn after it. */
+export interface RobotPlacement extends RobotRect {
+  headX: number
+  headY: number
+}
+
 /**
- * Draws an untinted district robot cell. The art already carries the district
- * palette, so unlike drawBotSprite there is no multiply tint or background keying.
- * Feet sit on `feetY`, centered on `cx`. Returns the square box (side = sprite
- * height, top = sprite top) used to anchor overlays such as hats and the crown.
+ * Draws a district robot cell. The art already carries the district palette, so
+ * unlike drawBotSprite there is no multiply tint or background keying; an agent
+ * color different from the robot accent is applied as a hue-rotate filter, and
+ * skins become filters on the sprite itself. Feet sit on `feetY`, centered on `cx`.
  */
 function drawRobotFrame(
   ctx: CanvasRenderingContext2D,
@@ -547,7 +570,7 @@ function drawRobotFrame(
   tick: number,
   robot: RobotFrame,
   opts: { cx: number; feetY: number; c: string },
-): { drawX: number; drawY: number; spriteSize: number } {
+): RobotPlacement {
   const { cx, feetY, c } = opts
   const { width, height } = getRobotDrawSize(robot.set)
   const left = Math.round(cx - width / 2)
@@ -556,20 +579,30 @@ function drawRobotFrame(
   const cellW = Math.floor((robot.image.naturalWidth || robot.image.width) / frames) || robot.set.frameWidth
   const cellH = robot.image.naturalHeight || robot.image.height || robot.set.frameHeight
   const sx = (Math.max(0, robot.frame) % frames) * cellW
+  const skin = agent.appearance?.skin ?? "default"
+  const districtColor = DISTRICTS.find((d) => d.id === agent.district)?.color ?? c
+
+  const filters: string[] = []
+  const colorFilter = getRobotColorFilter(robot.set, c)
+  if (colorFilter) filters.push(colorFilter)
+  const skinFilter = getRobotSkinFilter(skin, districtColor)
+  if (skinFilter) filters.push(skinFilter)
 
   ctx.save()
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = "high"
-  if ((agent.appearance?.skin ?? "default") === "hologram") {
+  if (skin === "hologram") {
     ctx.globalAlpha = 0.55 + Math.sin(tick * 0.1) * 0.15
   }
   if (agent.status === "offline") {
     ctx.globalAlpha *= 0.55
-    ctx.filter = "grayscale(1) brightness(0.6)"
+    filters.push("grayscale(1) brightness(0.6)")
   } else if (agent.status === "error" && Math.sin(tick * 0.2) > 0) {
-    ctx.filter = "drop-shadow(0 0 3px rgba(248,113,113,0.95))"
+    filters.push("drop-shadow(0 0 3px rgba(248,113,113,0.95))")
   }
-  if (agent.direction === "left") {
+  if (filters.length > 0) ctx.filter = filters.join(" ")
+  const facingLeft = agent.direction === "left"
+  if (facingLeft) {
     ctx.translate(left + width, 0)
     ctx.scale(-1, 1)
     ctx.drawImage(robot.image, sx, 0, cellW, cellH, 0, top, width, height)
@@ -578,11 +611,15 @@ function drawRobotFrame(
   }
   ctx.restore()
 
-  const box = { drawX: Math.round(cx - height / 2), drawY: top, spriteSize: height }
-  drawSkinOverlay(ctx, agent, tick, box.drawX, box.drawY, box.spriteSize, c)
-  drawAccessories(ctx, agent, box.drawX, box.drawY, box.spriteSize)
+  const rect = { left, top, width, height }
+  const head = getRobotHeadAnchor(robot.set, rect, facingLeft)
+  // Hologram scanlines and gold twinkles stay as overlays, clipped to the sprite rect.
+  if (skin === "hologram" || skin === "gold") {
+    drawSkinOverlay(ctx, agent, tick, left, top, width, c, height, true)
+  }
+  drawAccessoryRow(ctx, agent, head.x, head.y - 5)
   drawAuraParticles(ctx, agent, tick, cx, top + height / 2, c)
-  return box
+  return { ...rect, headX: head.x, headY: head.y }
 }
 
 function drawAntennaWaves(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, tick: number, cx: number, drawY: number, c: string) {
@@ -784,12 +821,17 @@ export function drawBot(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, tick
   let overlayX = drawX
   let overlayY = drawY
   let overlaySize = spriteSize
+  // Head anchor for the crown and antenna waves; the legacy box uses its top center.
+  let headX = cx
+  let headY = drawY
   if (robot) {
     // Feet land where the legacy 48px box put them, so labels and shadows stay put.
-    const box = drawRobotFrame(ctx, agent, tick, robot, { cx, feetY: drawY + spriteSize, c })
-    overlayX = box.drawX
-    overlayY = box.drawY
-    overlaySize = box.spriteSize
+    const placed = drawRobotFrame(ctx, agent, tick, robot, { cx, feetY: drawY + spriteSize, c })
+    overlayX = placed.left
+    overlayY = placed.top
+    overlaySize = placed.width
+    headX = placed.headX
+    headY = placed.headY
   } else if (sprite) {
     drawBotSprite(ctx, agent, tick, sprite, cropRegion, { drawX, drawY, spriteSize, c, cx })
   } else {
@@ -800,7 +842,7 @@ export function drawBot(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, tick
   }
 
   if (agent.status === "working") {
-    drawAntennaWaves(ctx, agent, tick, cx, overlayY, c)
+    drawAntennaWaves(ctx, agent, tick, headX, robot ? headY - 2 : overlayY, c)
   }
 
   if (agent.status === "offline") {
@@ -813,20 +855,39 @@ export function drawBot(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, tick
   if (globalRank && globalRank <= 3) {
     ctx.font = "bold 14px serif"
     ctx.textAlign = "center"
-    ctx.fillText("👑", cx, overlayY - 4)
+    // Sit the crown on the head, above any accessory row (which is centered at headY - 5).
+    const hasAccessories = robot && (agent.appearance?.accessories?.length ?? 0) > 0
+    const crownBaseline = robot ? headY - 1 - (hasAccessories ? 11 : 0) : overlayY - 4
+    ctx.fillText("👑", headX, crownBaseline)
     ctx.textAlign = "left"
   }
 
   drawStatusDot(ctx, agent.status, overlayX, overlayY, overlaySize, colorBlindMode)
-  drawNameLabel(ctx, agent.name, cx, y, spriteSize, c, agent.status)
+  // Collision offset from resolveLabelOffsets, so nearby agents' names do not overlap.
+  const labelOffsetY = (agent as MoltbotAgent & { labelOffsetY?: number }).labelOffsetY ?? 0
+  drawNameLabel(ctx, agent.name, cx, y + labelOffsetY, spriteSize, c, agent.status)
 
   if (agent.deployment === "cloud") {
     drawCloudBadge(ctx, overlayX, overlayY)
   }
 
   if (agent.status === "working" && agent.taskProgress > 0) {
-    drawTaskProgressBar(ctx, agent, cx, y, spriteSize, c)
+    drawTaskProgressBar(ctx, agent, cx, y + labelOffsetY, spriteSize, c)
   }
+}
+
+/** Name label size as drawn by drawBot (font must match drawNameLabel). */
+export const NAME_LABEL_HEIGHT = 13
+
+export function getNameLabelBox(
+  ctx: CanvasRenderingContext2D,
+  agent: Pick<MoltbotAgent, "id" | "name" | "pixelX" | "pixelY">,
+): { id: string; x: number; y: number; width: number; height: number } {
+  ctx.font = "bold 10px monospace"
+  const label = agent.name.length > 15 ? `${agent.name.slice(0, 14)}…` : agent.name
+  const width = Math.min(112, Math.max(38, ctx.measureText(label).width + 16))
+  // Mirrors drawBot: cx = x + 8, label top = y + spriteSize (48) + 1.
+  return { id: agent.id, x: Math.round(agent.pixelX) + 8, y: Math.round(agent.pixelY) + 49, width, height: NAME_LABEL_HEIGHT }
 }
 
 export function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number) {

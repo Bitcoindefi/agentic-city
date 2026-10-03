@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { drawBot, type RobotFrame } from "@/lib/renderer"
+import { NAME_LABEL_HEIGHT, drawBot, getNameLabelBox, type RobotFrame } from "@/lib/renderer"
 import { DISTRICT_ROBOTS, getRobotDrawSize } from "@/lib/robot-sprites"
 import type { MoltbotAgent } from "@/lib/types"
 
@@ -119,6 +119,79 @@ describe("drawBot with a district robot frame", () => {
     drawBot(ctx, agent, 5, true, undefined, undefined, false, robotFrame(0))
     expect(sets.some((s) => s.prop === "globalAlpha" && typeof s.value === "number" && s.value < 1)).toBe(true)
     expect(calls.some((c) => c.name === "fillText" && c.args[0] === "CLOUD")).toBe(true)
+  })
+
+  it("hue-shifts robots toward an agent color that differs from the accent", () => {
+    const native = makeCtx()
+    drawBot(native.ctx, baseAgent, 0, false, undefined, undefined, false, robotFrame(0))
+    expect(native.sets.some((s) => s.prop === "filter")).toBe(false)
+
+    const pink = makeCtx()
+    drawBot(pink.ctx, { ...baseAgent, color: "#f472b6" }, 0, false, undefined, undefined, false, robotFrame(0))
+    expect(pink.sets.find((s) => s.prop === "filter")?.value).toBe("hue-rotate(141deg) saturate(1.15)")
+  })
+
+  it("turns skins into sprite filters and keeps gold twinkles on the sprite rect", () => {
+    const neon = makeCtx()
+    drawBot(neon.ctx, { ...baseAgent, appearance: { skin: "neon", accessories: [], customColor: null } }, 0, false, undefined, undefined, false, robotFrame(0))
+    expect(String(neon.sets.find((s) => s.prop === "filter")?.value)).toContain("drop-shadow(0 0 2px #22d3ee)")
+
+    const gold = makeCtx()
+    drawBot(gold.ctx, { ...baseAgent, appearance: { skin: "gold", accessories: [], customColor: null } }, 2, false, undefined, undefined, false, robotFrame(0))
+    expect(String(gold.sets.find((s) => s.prop === "filter")?.value)).toContain("sepia")
+    expect(gold.sets.some((s) => s.prop === "globalCompositeOperation" && s.value === "multiply")).toBe(false)
+
+    const holo = makeCtx()
+    drawBot(holo.ctx, { ...baseAgent, appearance: { skin: "hologram", accessories: [], customColor: null } }, 0, false, undefined, undefined, false, robotFrame(0))
+    const { height } = getRobotDrawSize(set)
+    // Scanlines every 3px across the sprite height.
+    expect(holo.calls.filter((c) => c.name === "moveTo").length).toBeGreaterThanOrEqual(Math.floor(height / 3))
+  })
+
+  it("anchors accessories and the crown on the robot head", () => {
+    const { ctx, calls } = makeCtx()
+    const agent = {
+      ...baseAgent,
+      appearance: { skin: "default" as const, accessories: ["lightning" as const], customColor: null },
+      leaderboardRank: 1,
+    }
+    drawBot(ctx, agent, 0, false, undefined, undefined, false, robotFrame(0))
+    const { width, height } = getRobotDrawSize(set)
+    const left = Math.round(baseAgent.pixelX + 8 - width / 2)
+    const top = baseAgent.pixelY - 4 + 48 - height
+    const headX = Math.round(left + set.head.x * width)
+    const headY = Math.round(top + set.head.y * height)
+    const texts = calls.filter((c) => c.name === "fillText")
+    const accessory = texts.find((c) => c.args[0] === "⚡")
+    expect(accessory?.args.slice(1)).toEqual([headX, headY - 5])
+    const crown = texts.find((c) => c.args[0] === "👑")
+    expect(crown?.args.slice(1)).toEqual([headX, headY - 1 - 11])
+  })
+
+  it("mirrors the head anchor for left-facing robots", () => {
+    const { ctx, calls } = makeCtx()
+    drawBot(ctx, { ...baseAgent, direction: "left", leaderboardRank: 2 } as MoltbotAgent, 0, false, undefined, undefined, false, robotFrame(0))
+    const { width } = getRobotDrawSize(set)
+    const left = Math.round(baseAgent.pixelX + 8 - width / 2)
+    const crown = calls.find((c) => c.name === "fillText" && c.args[0] === "👑")
+    expect(crown?.args[1]).toBe(Math.round(left + (1 - set.head.x) * width))
+    expect(crown?.args[2]).toBe(Math.round(baseAgent.pixelY - 4 + 48 - getRobotDrawSize(set).height + set.head.y * getRobotDrawSize(set).height) - 1)
+  })
+
+  it("applies the label collision offset to the name label and progress bar", () => {
+    const plain = makeCtx()
+    const shifted = makeCtx()
+    const agent = { ...baseAgent, status: "working" as const, taskProgress: 50 }
+    drawBot(plain.ctx, agent, 0, false, undefined, undefined, false, robotFrame(0))
+    drawBot(shifted.ctx, { ...agent, labelOffsetY: 14 } as MoltbotAgent, 0, false, undefined, undefined, false, robotFrame(0))
+    const nameY = (calls: Call[]) => calls.find((c) => c.name === "fillText" && c.args[0] === agent.name)?.args[2] as number
+    expect(nameY(shifted.calls) - nameY(plain.calls)).toBe(14)
+  })
+
+  it("describes the name label box the way drawBot draws it", () => {
+    const { ctx } = makeCtx()
+    expect(getNameLabelBox(ctx, baseAgent)).toEqual({ id: baseAgent.id, x: 108, y: 149, width: 38, height: NAME_LABEL_HEIGHT })
+    expect(getNameLabelBox(ctx, { ...baseAgent, name: "A-very-long-agent-name" }).width).toBe(38)
   })
 
   it("keeps the legacy fallback when no robot frame is given", () => {

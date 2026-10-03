@@ -4,7 +4,8 @@ import { useRef, useEffect, useCallback, useState, useMemo } from "react"
 import NextImage from "next/image"
 import { LocateFixed, Map as MapIcon, Minus, Plus } from "lucide-react"
 import type { MoltbotAgent, District } from "@/lib/types"
-import { drawGrid, drawRoads, drawDistrict, drawBot } from "@/lib/renderer"
+import { drawGrid, drawRoads, drawDistrict, drawBot, getNameLabelBox } from "@/lib/renderer"
+import { resolveLabelOffsets } from "@/lib/label-layout"
 import type { DistrictStanding } from "@/lib/gamification/events"
 import { ParticleSystem, type ParticleEvent, type ParticleOpts } from "@/lib/renderer/particles"
 import type { CityAudioEngine } from "@/lib/audio/city-audio"
@@ -532,6 +533,8 @@ export function PixelCity({
     )
 
     const sorted = [...agents].sort((a, b) => a.pixelY - b.pixelY)
+    // Push overlapping name labels apart before drawing (one pass per frame).
+    const labelOffsets = resolveLabelOffsets(sorted.map((agent) => getNameLabelBox(ctx, agent)))
     for (const agent of sorted) {
       const spriteIdx = agent.spriteId % sprites.length
       const agentSprite = sprites[spriteIdx] || sprites[0]
@@ -540,6 +543,7 @@ export function PixelCity({
         ...agent,
         leaderboardRank: topGlobalRanks.get(agent.id),
         isDistrictLeader: districtLeaderIds.has(agent.id),
+        labelOffsetY: labelOffsets.get(agent.id) ?? 0,
       }
       const robotSet = getDistrictRobot(agent.district)
       const robotImage = robotSheets[robotSet.district]

@@ -12,6 +12,12 @@ import {
   getRobotStillPath,
   robotPhaseFor,
   shouldAnimateRobot,
+  colorHue,
+  hueRotation,
+  getRobotColorFilter,
+  getRobotSkinFilter,
+  getRobotHeadAnchor,
+  ROBOT_SHIFT_SATURATE,
 } from "./robot-sprites"
 import { DISTRICTS } from "./data"
 
@@ -114,5 +120,101 @@ describe("shouldAnimateRobot", () => {
     expect(shouldAnimateRobot("offline", false)).toBe(false)
     expect(shouldAnimateRobot("error", false)).toBe(false)
     expect(shouldAnimateRobot("working", true, true)).toBe(false)
+  })
+})
+
+describe("colorHue", () => {
+  it("reads the hue of hex colors", () => {
+    expect(colorHue("#22d3ee")).toBe(188)
+    expect(colorHue("#f472b6")).toBe(329)
+    expect(colorHue("#34d399")).toBe(158)
+    expect(colorHue("#00ff00")).toBe(120)
+    expect(colorHue("#ff0000")).toBe(0)
+    expect(colorHue("#ABC")).toBe(210)
+    expect(colorHue("  #0000ff ")).toBe(240)
+  })
+
+  it("returns null for grays, invalid and empty input", () => {
+    expect(colorHue("#888888")).toBeNull()
+    expect(colorHue("#fff")).toBeNull()
+    expect(colorHue("red")).toBeNull()
+    expect(colorHue("#12345")).toBeNull()
+    expect(colorHue("")).toBeNull()
+    expect(colorHue(null)).toBeNull()
+    expect(colorHue(undefined)).toBeNull()
+  })
+})
+
+describe("hueRotation", () => {
+  it("takes the shortest signed path around the wheel", () => {
+    expect(hueRotation(350, 10)).toBe(20)
+    expect(hueRotation(10, 350)).toBe(-20)
+    expect(hueRotation(162, 329)).toBe(167)
+    expect(hueRotation(0, 180)).toBe(180)
+    expect(hueRotation(40, 40)).toBe(0)
+  })
+})
+
+describe("getRobotColorFilter", () => {
+  it("keeps the native art when the agent color matches the robot accent", () => {
+    expect(getRobotColorFilter(DISTRICT_ROBOTS["data-center"], "#22d3ee")).toBeNull()
+    expect(getRobotColorFilter(DISTRICT_ROBOTS["comm-hub"], "#34d399")).toBeNull()
+    for (const district of DISTRICTS) {
+      expect(getRobotColorFilter(DISTRICT_ROBOTS[district.id], district.color)).toBeNull()
+    }
+  })
+
+  it("hue-shifts toward a different agent color with a modest saturate", () => {
+    expect(getRobotColorFilter(DISTRICT_ROBOTS["comm-hub"], "#f472b6")).toBe(
+      `hue-rotate(167deg) saturate(${ROBOT_SHIFT_SATURATE})`,
+    )
+  })
+
+  it("applies the tolerance edge exactly", () => {
+    expect(getRobotColorFilter({ accentHue: 101 }, "#00ff00")).toBeNull()
+    expect(getRobotColorFilter({ accentHue: 100 }, "#00ff00")).toBe(`hue-rotate(20deg) saturate(${ROBOT_SHIFT_SATURATE})`)
+  })
+
+  it("ignores gray or invalid colors", () => {
+    expect(getRobotColorFilter({ accentHue: 100 }, "#777777")).toBeNull()
+    expect(getRobotColorFilter({ accentHue: 100 }, "nope")).toBeNull()
+    expect(getRobotColorFilter({ accentHue: 100 }, null)).toBeNull()
+  })
+})
+
+describe("getRobotSkinFilter", () => {
+  it("maps skins to sprite filters", () => {
+    expect(getRobotSkinFilter("neon", "#34d399")).toContain("drop-shadow(0 0 2px #34d399)")
+    expect(getRobotSkinFilter("chrome", "#000")).toContain("saturate(0.35)")
+    expect(getRobotSkinFilter("gold", "#000")).toContain("sepia")
+  })
+
+  it("leaves default, hologram, legendary and unknown skins untouched", () => {
+    for (const skin of ["default", "hologram", "legendary", "unknown", null, undefined]) {
+      expect(getRobotSkinFilter(skin, "#000")).toBeNull()
+    }
+  })
+})
+
+describe("getRobotHeadAnchor", () => {
+  const rect = { left: 10, top: 20, width: 40, height: 100 }
+
+  it("scales the head fractions into the drawn rect", () => {
+    expect(getRobotHeadAnchor({ head: { x: 0.5, y: 0.1 } }, rect)).toEqual({ x: 30, y: 30 })
+  })
+
+  it("mirrors the head x for left-facing robots", () => {
+    expect(getRobotHeadAnchor({ head: { x: 0.25, y: 0 } }, rect, true)).toEqual({ x: 40, y: 20 })
+  })
+
+  it("puts every robot head in the top part of its cell", () => {
+    for (const set of ROBOT_SPRITE_SETS) {
+      expect(set.head.x).toBeGreaterThan(0.3)
+      expect(set.head.x).toBeLessThan(0.7)
+      expect(set.head.y).toBeGreaterThanOrEqual(0)
+      expect(set.head.y).toBeLessThan(0.3)
+      expect(set.accentHue).toBeGreaterThanOrEqual(0)
+      expect(set.accentHue).toBeLessThan(360)
+    }
   })
 })
