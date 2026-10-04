@@ -2,6 +2,7 @@ import type { AgentStatus } from "@/lib/types"
 import type { X402Receipt } from "@/lib/protocols/x402"
 import type { BadgeRarity } from "@/lib/gamification/badge-catalog"
 import type { Quest } from "@/lib/quests/quest-store"
+import { recordAgentReplay } from "@/lib/events/agent-replay"
 
 export interface AgentTask {
   id: string
@@ -134,6 +135,7 @@ export function eventMatchesAgent(event: PublishedSystemEvent, agentId?: string)
 export function publishSystemEvent(event: SystemEvent): PublishedSystemEvent {
   const published = ensurePublishedEvent(event)
   appendToEventLog(published)
+  recordAgentReplay(published)
   for (const listener of eventBus.listeners) {
     listener(published)
   }
