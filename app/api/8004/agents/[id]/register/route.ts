@@ -3,6 +3,7 @@ import { getClientIp } from "@/lib/auth/middleware"
 import { isStrictSameOrigin } from "@/lib/connections/hydrate"
 import { serializeCookie, type CookieWrite } from "@/lib/connections/sealed-cookie"
 import { ensureBrowserId } from "@/lib/identity/browser-id"
+import { recordReceipt } from "@/lib/receipts/log"
 import { IdentityError, registerAgentIdentity } from "@/lib/solana/agent-identity"
 import { browserOwner, resolveAgentOwner, type AgentOwner } from "@/lib/solana/agent-owner"
 import { REGISTRATION_LIMITS, reserveRegistration } from "@/lib/solana/registration-quota"
@@ -63,6 +64,10 @@ export async function POST(req: Request, context: RouteContext) {
   try {
     const result = await registerAgentIdentity({ id: decodeURIComponent(id), name, role, model, ownerTag: owner.tag }, new URL(req.url).origin)
     if (result.alreadyRegistered) await reservation.release()
+    else if (result.signature) {
+      // Public receipts log (best-effort, never throws). The treasury paid; no owner id goes in.
+      await recordReceipt({ type: "registration", tx: result.signature, agentId: decodeURIComponent(id), agentName: name, identity: result.asset })
+    }
     return reply({ ok: true, ...result })
   } catch (error) {
     await reservation.release().catch(() => undefined)

@@ -8,6 +8,8 @@ vi.mock("@/lib/solana/x402", async (importOriginal) => ({ ...(await importOrigin
 import { POST } from "@/app/api/x402/agents/[id]/task/route"
 import { createMemoryStore, setKvStoreForTests } from "@/lib/security/kv-store"
 import { getPaymentAgent } from "@/lib/solana/payment-bindings"
+import { createMemoryReceiptBackend, readReceiptLog, setReceiptBackendForTests } from "@/lib/receipts/log"
+import { USDC_DEVNET_MINT } from "@/lib/solana/payment-constants"
 
 const settle = { success: true, transaction: "settle-sig", network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", payer: "payer" }
 const paid = { ok: true, settle, payer: "payer", requirements: { amount: "10000", asset: "usdc-mint" } }
@@ -50,6 +52,22 @@ describe("POST /api/x402/agents/[id]/task", () => {
       expect(error).toHaveBeenCalled()
     } finally {
       setKvStoreForTests(null)
+    }
+  })
+
+  it("adds a public receipt (no task text, short payer) to the receipts log", async () => {
+    const backend = createMemoryReceiptBackend()
+    setReceiptBackendForTests(backend)
+    try {
+      const tx = "5".repeat(88)
+      const payer = "Bp6mXwYzAbCdEfGhJkLmNpQrStUvWxYz12345678abcd"
+      requirePayment.mockResolvedValue({ ...paid, settle: { ...settle, transaction: tx }, payer, requirements: { amount: "10000", asset: USDC_DEVNET_MINT } })
+      expect((await post({ task: "resumí mi contrato secreto", agent })).status).toBe(200)
+      const [record] = await readReceiptLog(backend)
+      expect(record).toMatchObject({ type: "payment", tx, amount: "10000", asset: "USDC", agentId: "agent-1", agentName: "Investigador", payer: "Bp6m…abcd" })
+      expect(JSON.stringify(record)).not.toMatch(/secreto|or-key/)
+    } finally {
+      setReceiptBackendForTests(null)
     }
   })
 

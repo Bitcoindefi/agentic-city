@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { BYOK_PROVIDERS, generateWithByokProvider, type ByokProviderId } from "@/lib/ai/byok-provider"
 import { withOAuthCredentials } from "@/lib/connections/hydrate"
+import { recordReceipt } from "@/lib/receipts/log"
 import { resolveAgentOwner, scopedAgentKey } from "@/lib/solana/agent-owner"
 import { agentTaskSystemPrompt } from "@/lib/solana/agent-task-prompt"
 import { recordAgentPayment } from "@/lib/solana/payment-bindings"
@@ -48,6 +49,17 @@ export async function POST(request: Request, context: RouteContext) {
   } catch (error) {
     console.error("[x402] could not record the payment binding:", error instanceof Error ? error.message : error)
   }
+
+  // Public receipts log (best-effort, never throws): no task text, only public facts.
+  await recordReceipt({
+    type: "payment",
+    tx: payment.settle.transaction,
+    amount: payment.requirements.amount,
+    asset: payment.requirements.asset,
+    agentId,
+    agentName: name,
+    payer: payment.payer,
+  })
 
   const receipt = {
     transaction: payment.settle.transaction,

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { UiWalletAccount } from "@wallet-standard/react"
 import { useSignAndSendTransaction } from "@solana/react"
 import { getBase58Decoder } from "@solana/kit"
-import { BadgeCheck, ExternalLink, Fingerprint } from "lucide-react"
+import { BadgeCheck, ExternalLink, Fingerprint, ReceiptText } from "lucide-react"
 import { reviewTransactionProblem, type TreasuryKeys } from "@/lib/solana/client-guards"
 import { friendlyProviderError } from "@/lib/ai/friendly-error"
 import { pollUntil } from "@/lib/poll-until"
@@ -98,6 +98,7 @@ export function AgentIdentityRow({ agent, refreshKey, onTreasury }: { agent: { i
           : <button type="button" onClick={() => void register()} disabled={state === "registering"} className="rounded-lg border border-cyan-300/30 px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-cyan-100 disabled:opacity-50">{state === "registering" ? "Registrando…" : "Registrar"}</button>}
       </div>
       {identity?.registered ? <p className="mt-1 font-mono text-[11px] text-slate-500">{identity.reputation && identity.reputation.totalFeedbacks > 0 ? `Reputación ${Math.round(identity.reputation.averageScore)}/100 · ${identity.reputation.totalFeedbacks} reseña${identity.reputation.totalFeedbacks === 1 ? "" : "s"}` : "Sin reseñas todavía"}</p> : null}
+      <a href={`/explorer?agent=${encodeURIComponent(agent.id)}`} className="mt-1 inline-flex items-center gap-1 font-mono text-[11px] text-cyan-200/80 underline">Ver sus recibos en cadena <ReceiptText className="h-3 w-3" /></a>
       {refreshing ? <p role="status" className="mt-1 font-mono text-[11px] text-cyan-200/80">Actualizando reputación…</p> : null}
       {error ? <p role="alert" className="mt-1 text-[11px] text-rose-200">{error}</p> : null}
     </div>
@@ -126,8 +127,17 @@ export function ReviewAfterPayment({ account, agentId, paymentSignature, feePaye
       const problem = reviewTransactionProblem(bytes, feePayer)
       if (problem) throw new Error(`La transacción de reseña no es la esperada (${problem}). No la firmes.`)
       const { signature } = await signAndSend({ transaction: bytes })
-      setDone(getBase58Decoder().decode(signature))
+      const sent = getBase58Decoder().decode(signature)
+      setDone(sent)
       onReviewed()
+      // Tell the server it was sent, so the public receipts explorer lists it once confirmed.
+      // Best-effort: the review is already on-chain either way.
+      void fetch(`/api/8004/agents/${encodeURIComponent(agentId)}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewSignature: sent }),
+        keepalive: true,
+      }).catch(() => undefined)
     } catch (reviewError) {
       setError(reviewError instanceof Error ? friendlyProviderError(reviewError.message) : "No se pudo enviar la reseña.")
     } finally {

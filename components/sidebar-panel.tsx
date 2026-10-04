@@ -919,6 +919,32 @@ export function SidebarPanel({
           ))}
           <NotificationBell agentId={selectedAgent?.id ?? null} />
           <a
+            href="/explorer"
+            title="Recibos en cadena: pagos x402, contrataciones y 8004 en Solana devnet"
+            style={{
+              padding: "10px 8px",
+              background: "transparent",
+              borderBottom: "2px solid transparent",
+              color: "#5eead4",
+              fontFamily: "monospace",
+              fontSize: 10,
+              fontWeight: 400,
+              cursor: "pointer",
+              textDecoration: "none",
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              display: "flex",
+              alignItems: "center",
+              whiteSpace: "nowrap",
+              transition: "color 0.15s",
+              flexShrink: 0,
+            }}
+            onMouseEnter={e => (e.currentTarget.style.color = "#99f6e4")}
+            onMouseLeave={e => (e.currentTarget.style.color = "#5eead4")}
+          >
+            Recibos ↗
+          </a>
+          <a
             href="/admin"
             style={{
               padding: "10px 8px",

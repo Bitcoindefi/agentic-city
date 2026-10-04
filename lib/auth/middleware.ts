@@ -204,6 +204,7 @@ export function isPublicApiRoute(pathname: string, method: string): boolean {
       pathname.startsWith("/api/events/") ||
       pathname.startsWith("/api/districts/") ||
       pathname.startsWith("/api/explorer/") ||
+      pathname === "/api/receipts" ||
       pathname === "/api/openapi.json" ||
       pathname === "/api/webhooks/event-types" ||
       pathname === "/api/tasks" ||

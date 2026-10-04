@@ -79,11 +79,17 @@ El settle acepta `agentId` opcional; si está presente, llama al gate de passpor
 
 Archivos: [lib/protocols/x402.ts](lib/protocols/x402.ts), [app/api/protocol/x402/](app/api/protocol/x402/)
 
-### x402 Explorer
+### Receipts explorer (Solana devnet)
 
-Accepted x402 settlements are recorded in an in-memory receipt registry and exposed through the public explorer at `/explorer`. The same paginated, filterable data is available at `GET /api/explorer/receipts` for third-party dashboards or audits.
+The public explorer at `/explorer` lists every x402 payment, agent-to-agent hire and 8004 registration or review on Solana devnet, each linked to its transaction on Solana Explorer, with totals (payments, USDC volume, hires, reviews, registered agents, unique payers) and a per-agent filter (`/explorer?agent=<id>`).
 
-Archivos: [app/explorer/page.tsx](app/explorer/page.tsx), [components/explorer/receipt-table.tsx](components/explorer/receipt-table.tsx), [app/api/explorer/receipts/route.ts](app/api/explorer/receipts/route.ts)
+- Each event appends a small public record (type, tx, amount, agent id and name, short payer address, time; never prompts or task text) to a capped Redis list (last 500), best-effort so it never fails the payment.
+- Treasury activity from before the log existed is read back from the chain (`getSignaturesForAddress` on the treasury USDC account and wallet) and shown as "leído de la cadena". Set `RECEIPTS_ONCHAIN_BACKFILL=off` to disable it.
+- `GET /api/receipts?type=payment|hire|registration|review&agent=<id>&page=1&pageSize=25` serves the same data (public, cached about 10 seconds).
+
+The legacy Stellar-era registry is still served at `GET /api/explorer/receipts`.
+
+Archivos: [app/explorer/page.tsx](app/explorer/page.tsx), [components/explorer/receipts-explorer.tsx](components/explorer/receipts-explorer.tsx), [app/api/receipts/route.ts](app/api/receipts/route.ts), [lib/receipts/](lib/receipts/)
 
 ### Agent Passport (ZK) — capa de confianza zero-knowledge
 

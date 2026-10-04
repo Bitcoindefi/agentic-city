@@ -1066,6 +1066,32 @@ export function OpenStellarHub({ initialDistrictEvent }: { initialDistrictEvent:
         <div style={{ position: "absolute", top: 14, right: 14, zIndex: 12, display: "flex", alignItems: "center", gap: 8 }}>
           {isMobile === false && (
             <a
+              href="/explorer"
+              aria-label="Recibos en cadena: pagos x402, contrataciones y 8004 en Solana devnet"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "8px 11px",
+                border: "1px solid #5eead488",
+                borderRadius: 6,
+                background: "rgba(3,7,18,0.88)",
+                color: "#5eead4",
+                fontFamily: "monospace",
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: 1,
+                textDecoration: "none",
+                textTransform: "uppercase",
+                boxShadow: "0 6px 18px rgba(0,0,0,0.35)",
+              }}
+            >
+              <ScrollText size={14} aria-hidden="true" />
+              Recibos
+            </a>
+          )}
+          {isMobile === false && (
+            <a
               href="/admin"
               aria-label="Open Agentic City admin console"
               style={{

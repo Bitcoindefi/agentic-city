@@ -16,6 +16,7 @@ import {
   type RosterAgent,
 } from "@/lib/orchestration/handoff"
 import type { HopResult } from "@/lib/orchestration/wallet"
+import { createMemoryReceiptBackend, readReceiptLog, setReceiptBackendForTests } from "@/lib/receipts/log"
 
 const connection = { provider: "openrouter" as const, model: "anthropic/claude", apiKey: "or-test-key-1234" }
 const roster: RosterAgent[] = [
@@ -90,6 +91,21 @@ describe("sendHandoff", () => {
     ])
     expect(run).toMatchObject({ hops: 1, spentMicro: 10_000, receipts: [receipt(1)] })
     expect(await spentToday(store, OWNER, day)).toBe(10_000)
+  })
+
+  it("adds the hire to the public receipts log: who hired whom, never the task", async () => {
+    const backend = createMemoryReceiptBackend()
+    setReceiptBackendForTests(backend)
+    try {
+      const tx = "5".repeat(88)
+      const { deps, run } = setup({ hire: vi.fn(async (): Promise<HopResult> => ({ ok: true, answer: "ok", receipt: { ...receipt(1), transaction: tx, payer: null, amount: "" } })) })
+      await sendHandoff(deps, run, from, "research", { task: "Find my secret plans" })
+      const [record] = await readReceiptLog(backend)
+      expect(record).toMatchObject({ type: "hire", tx, amount: "10000", asset: "USDC", agentId: "research", agentName: "Investigador", counterpartId: "orchestrator", counterpartName: "Supervisor", payer: "Agen…1111" })
+      expect(JSON.stringify(record)).not.toContain("secret")
+    } finally {
+      setReceiptBackendForTests(null)
+    }
   })
 
   it("refuses with a sentence, never an exception", async () => {

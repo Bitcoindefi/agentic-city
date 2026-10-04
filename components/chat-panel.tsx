@@ -237,6 +237,9 @@ export function ChatPanel({ messages }: ChatPanelProps) {
           <a href={item.explorerUrl} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "#5eead4" }}>
             tx {shortSignature(item.transaction)} <ExternalLink size={10} aria-hidden="true" />
           </a>
+          <a href={`/explorer?agent=${encodeURIComponent(item.toName)}`} style={{ color: "#5eead4", textDecoration: "underline" }}>
+            recibos
+          </a>
           <span style={{ marginLeft: "auto", color: "#64748b" }}>Solana devnet</span>
         </div>
       )

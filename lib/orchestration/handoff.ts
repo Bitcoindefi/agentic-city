@@ -5,6 +5,7 @@ import { microToUsdc, releaseDaily, reserveDaily, type OrchestratorCaps } from "
 import type { ApprovalPayload, ApprovalReason, ApprovalSigner } from "@/lib/orchestration/approval"
 import { shortSignature, type ChatStreamEvent } from "@/lib/orchestration/events"
 import type { HireAgent, HopReceipt, HopResult } from "@/lib/orchestration/wallet"
+import { recordReceipt } from "@/lib/receipts/log"
 
 // One agent hiring another, paid from the browser's own agents' wallet.
 //
@@ -134,6 +135,18 @@ async function payAndRun(deps: HandoffDeps, run: RunState, from: Hirer, agent: R
   // run.spentMicro already holds this hire: it was reserved before the first await.
   run.receipts.push(result.receipt)
   deps.emit({ type: "handoff", turnId: from.turnId, fromName: from.name, toName: agent.name, task: envelope.task.slice(0, 300), amount, receipt: result.receipt })
+  // Public receipts log (best-effort, never throws): who hired whom and the payment, never the task.
+  await recordReceipt({
+    type: "hire",
+    tx: result.receipt.transaction,
+    amount: result.receipt.amount || String(deps.priceMicro),
+    asset: result.receipt.asset,
+    agentId: agent.id,
+    agentName: agent.name,
+    counterpartId: from.id,
+    counterpartName: from.name,
+    payer: result.receipt.payer ?? deps.wallet?.address ?? null,
+  })
 
   if (!result.ok) {
     return {

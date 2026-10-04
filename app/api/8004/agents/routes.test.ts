@@ -14,7 +14,16 @@ import { IdentityError, agentAssetKeypair } from "@/lib/solana/agent-identity"
 import { ownerTagFor } from "@/lib/solana/agent-owner"
 import { REGISTRATION_LIMITS } from "@/lib/solana/registration-quota"
 import { BROWSER_ID_COOKIE, browserIdCookie } from "@/lib/identity/browser-id"
-import { createMemoryStore, setKvStoreForTests, type KvStore } from "@/lib/security/kv-store"
+import { createMemoryStore, getKvStore, setKvStoreForTests, type KvStore } from "@/lib/security/kv-store"
+import { createMemoryReceiptBackend, readReceiptLog, setReceiptBackendForTests } from "@/lib/receipts/log"
+import { firstSignature } from "@/lib/receipts/review-confirm"
+
+/** The pending review the last prepared feedback left in the store (fee payer signature = 0x07 * 64). */
+async function pendingReviewForTest() {
+  const signature = firstSignature(Buffer.from(Uint8Array.from([2, ...new Array(64).fill(7), ...new Array(64).fill(0)])).toString("base64"))
+  const raw = await getKvStore().get(`ac:receipts:pending-review:${signature}`)
+  return raw ? JSON.parse(raw) : null
+}
 
 const ORIGIN = "https://agentic-city.test"
 const UID = "5".repeat(32)
@@ -176,6 +185,39 @@ describe("8004 routes", () => {
     setKvStoreForTests(down)
     expect((await register(post("/api/8004/agents/a/register", {}, { cookie }), ctx("a"))).status).toBe(503)
     expect(identity.registerAgentIdentity).not.toHaveBeenCalled()
+  })
+
+  it("register adds a new identity (not a repeated one) to the public receipts log", async () => {
+    const backend = createMemoryReceiptBackend()
+    setReceiptBackendForTests(backend)
+    try {
+      const asset = server.publicKey.toBase58()
+      identity.registerAgentIdentity.mockResolvedValue({ asset, signature: "5".repeat(88), alreadyRegistered: false })
+      expect((await register(post("/api/8004/agents/research/register", { name: "Investigador" }, { cookie }), ctx("research"))).status).toBe(200)
+      identity.registerAgentIdentity.mockResolvedValue({ asset, signature: null, alreadyRegistered: true })
+      expect((await register(post("/api/8004/agents/research/register", { name: "Investigador" }, { cookie }), ctx("research"))).status).toBe(200)
+      const records = await readReceiptLog(backend)
+      expect(records).toHaveLength(1)
+      expect(records[0]).toMatchObject({ type: "registration", agentId: "research", agentName: "Investigador", identity: asset, payer: null })
+      expect(JSON.stringify(records[0])).not.toContain(ownerTagFor(`browser:${UID}`) as string)
+    } finally {
+      setReceiptBackendForTests(null)
+    }
+  })
+
+  it("feedback remembers the prepared review and only logs a reported signature it prepared", async () => {
+    const tx = new Uint8Array(1 + 64 * 2 + 4)
+    tx[0] = 2
+    tx.fill(7, 1, 65)
+    identity.prepareFeedback.mockResolvedValue({ transaction: Buffer.from(tx).toString("base64"), asset: "A" })
+    expect((await feedback(post("/api/8004/agents/a/feedback", { score: 100, paymentSignature: "p", payer: "w", agentName: "Bot" }, { cookie }), ctx("a"))).status).toBe(200)
+    const pending = await pendingReviewForTest()
+    expect(pending).toMatchObject({ agentId: "a", agentName: "Bot", payer: "w", score: 100 })
+
+    const unknown = await feedback(post("/api/8004/agents/a/feedback", { reviewSignature: "5".repeat(88) }), ctx("a"))
+    expect(unknown.status).toBe(404)
+    expect((await feedback(post("/api/8004/agents/a/feedback", { reviewSignature: "nope" }), ctx("a"))).status).toBe(400)
+    expect((await feedback(post("/api/8004/agents/a/feedback", { reviewSignature: "5".repeat(88) }, { origin: "https://evil.test" }), ctx("a"))).status).toBe(403)
   })
 
   it("feedback needs a same-origin request and a payment, and returns the prepared transaction", async () => {
