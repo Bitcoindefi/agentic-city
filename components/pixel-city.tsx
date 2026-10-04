@@ -4,7 +4,7 @@ import { useRef, useEffect, useCallback, useState, useMemo } from "react"
 import NextImage from "next/image"
 import { LocateFixed, Map as MapIcon, Minus, Plus } from "lucide-react"
 import type { MoltbotAgent, District } from "@/lib/types"
-import { drawGrid, drawRoads, drawDistrict, drawBot, getNameLabelBox } from "@/lib/renderer"
+import { drawGrid, drawRoads, drawDistrict, drawBot, drawAgentLabel, getAgentSpriteBox, getNameLabelBox } from "@/lib/renderer"
 import { resolveLabelOffsets } from "@/lib/label-layout"
 import type { DistrictStanding } from "@/lib/gamification/events"
 import { ParticleSystem, type ParticleEvent, type ParticleOpts } from "@/lib/renderer/particles"
@@ -17,14 +17,11 @@ import {
   robotPhaseFor,
   shouldAnimateRobot,
 } from "@/lib/robot-sprites"
+import { CITY_BACKGROUND, DISTRICT_BACKGROUNDS } from "@/lib/district-backgrounds"
 
-const BG_IMAGES: Record<string, string> = {
-  "data-center": "/bg-data-center.jpg",
-  "comm-hub": "/bg-comm-hub.jpg",
-  processing: "/bg-processing.jpg",
-  defense: "/bg-defense.jpg",
-  research: "/bg-research.jpg",
-}
+const BG_IMAGES: Record<string, string> = Object.fromEntries(
+  Object.entries(DISTRICT_BACKGROUNDS).map(([id, bg]) => [id, bg.webp]),
+)
 
 export interface SpriteConfig {
   path: string
@@ -533,8 +530,15 @@ export function PixelCity({
     )
 
     const sorted = [...agents].sort((a, b) => a.pixelY - b.pixelY)
-    // Push overlapping name labels apart before drawing (one pass per frame).
-    const labelOffsets = resolveLabelOffsets(sorted.map((agent) => getNameLabelBox(ctx, agent)))
+    // Push overlapping name labels apart (and off robot bodies) once per frame.
+    const labelOffsets = resolveLabelOffsets(
+      sorted.map((agent) => getNameLabelBox(ctx, agent)),
+      sorted.map((agent) => {
+        const set = getDistrictRobot(agent.district)
+        return getAgentSpriteBox(agent, robotSheets[set.district] ? set : undefined)
+      }),
+    )
+    const labelPass: MoltbotAgent[] = []
     for (const agent of sorted) {
       const spriteIdx = agent.spriteId % sprites.length
       const agentSprite = sprites[spriteIdx] || sprites[0]
@@ -544,7 +548,9 @@ export function PixelCity({
         leaderboardRank: topGlobalRanks.get(agent.id),
         isDistrictLeader: districtLeaderIds.has(agent.id),
         labelOffsetY: labelOffsets.get(agent.id) ?? 0,
+        deferLabel: true,
       }
+      labelPass.push(enriched)
       const robotSet = getDistrictRobot(agent.district)
       const robotImage = robotSheets[robotSet.district]
       const isMoving = Math.hypot(agent.targetX - agent.pixelX, agent.targetY - agent.pixelY) > 1.5
@@ -563,6 +569,8 @@ export function PixelCity({
         : undefined
       drawBot(ctx, enriched, tick, agent.id === selectedAgentId, agentSprite, crop, colorBlindMode, robot)
     }
+    // Final pass: names above every sprite.
+    for (const agent of labelPass) drawAgentLabel(ctx, agent)
 
     if (!reduceMotion) {
       const now = Date.now()
@@ -854,14 +862,16 @@ export function PixelCity({
 
   return (
     <div ref={containerRef} style={{ width: "100%", height: "100%", position: "relative", overflow: "hidden" }}>
-      {/* Full-viewport animated city GIF background */}
+      {/* Full-viewport night skyline. Static art; a slow drift and a faint window
+          twinkle (CSS, disabled under reduced motion) keep it alive cheaply. */}
       <NextImage
-        src="/bg-city.gif"
+        src={CITY_BACKGROUND}
         alt=""
         aria-hidden="true"
         unoptimized
         fill
         sizes="100vw"
+        className="city-bg-drift"
         style={{
           position: "absolute",
           top: 0,
@@ -874,6 +884,7 @@ export function PixelCity({
           imageRendering: "pixelated",
         }}
       />
+      <div aria-hidden="true" className="city-bg-twinkle" />
       <canvas
         ref={canvasRef}
         role="img"

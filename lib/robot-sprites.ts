@@ -36,7 +36,7 @@ export const ROBOT_FRAME_MS = 120
 export const ROBOT_FRAMES = 6
 
 /** Uniform scale applied to every robot so their designed proportions stay relative. */
-export const ROBOT_MAP_SCALE = 0.38
+export const ROBOT_MAP_SCALE = 0.44
 
 function robot(
   id: RobotSpriteSet["id"],

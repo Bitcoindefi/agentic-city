@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest"
-import { NAME_LABEL_HEIGHT, drawBot, getNameLabelBox, type RobotFrame } from "@/lib/renderer"
+import {
+  NAME_LABEL_HEIGHT,
+  NAME_LABEL_HEIGHT_WITH_BAR,
+  drawAgentLabel,
+  drawBot,
+  drawDistrict,
+  getAgentSpriteBox,
+  getNameLabelBox,
+  type RobotFrame,
+} from "@/lib/renderer"
+import { DISTRICTS } from "@/lib/data"
+import { DISTRICT_TINT_ALPHA, DISTRICT_TINT_ALPHA_COLOR_BLIND } from "@/lib/district-backgrounds"
 import { DISTRICT_ROBOTS, getRobotDrawSize } from "@/lib/robot-sprites"
 import type { MoltbotAgent } from "@/lib/types"
 
@@ -199,5 +210,69 @@ describe("drawBot with a district robot frame", () => {
     drawBot(ctx, baseAgent, 0, false)
     expect(drawImageCalls(calls)).toHaveLength(0)
     expect(calls.some((c) => c.name === "fillRect")).toBe(true)
+  })
+
+  it("defers the label to the final pass when asked", () => {
+    const { ctx, calls } = makeCtx()
+    drawBot(ctx, { ...baseAgent, deferLabel: true } as MoltbotAgent, 0, false, undefined, undefined, false, robotFrame(0))
+    expect(calls.some((c) => c.name === "fillText" && c.args[0] === baseAgent.name)).toBe(false)
+  })
+
+  it("draws the progress bar inside the label, below the text", () => {
+    const { ctx, calls } = makeCtx()
+    const agent = { ...baseAgent, status: "working" as const, taskProgress: 50, labelOffsetY: 15 } as MoltbotAgent
+    drawAgentLabel(ctx, agent)
+    const top = baseAgent.pixelY + 49 + 15
+    const text = calls.find((c) => c.name === "fillText" && c.args[0] === baseAgent.name)
+    expect(text?.args[2]).toBe(top + 9.5)
+    const pill = calls.find((c) => c.name === "roundRect")
+    expect(pill?.args[3]).toBe(NAME_LABEL_HEIGHT_WITH_BAR)
+    const bars = calls.filter((c) => c.name === "fillRect" && c.args[1] === top + 13)
+    expect(bars).toHaveLength(2)
+    // Track spans the label minus padding; the fill is half of it.
+    expect(bars[1].args[2]).toBe(Math.floor((bars[0].args[2] as number) / 2))
+  })
+
+  it("sizes label boxes by whether a progress bar is shown", () => {
+    const { ctx } = makeCtx()
+    expect(getNameLabelBox(ctx, { ...baseAgent, status: "working", taskProgress: 10 }).height).toBe(NAME_LABEL_HEIGHT_WITH_BAR)
+    expect(getNameLabelBox(ctx, { ...baseAgent, status: "working", taskProgress: 0 }).height).toBe(NAME_LABEL_HEIGHT)
+  })
+
+  it("reports sprite boxes for label avoidance", () => {
+    const { width, height } = getRobotDrawSize(set)
+    const robotBox = getAgentSpriteBox(baseAgent, set)
+    expect(robotBox).toEqual({ id: baseAgent.id, x: 108, y: 144 - height - 3, width: Math.round(width * 0.75), height: height + 3 })
+    // The robot's own label (top at y + 49) clears its sprite box.
+    expect(robotBox.y + robotBox.height).toBeLessThan(baseAgent.pixelY + 49)
+    expect(getAgentSpriteBox(baseAgent)).toEqual({ id: baseAgent.id, x: 108, y: 93, width: 42, height: 51 })
+  })
+})
+
+describe("drawDistrict backgrounds", () => {
+  const district = DISTRICTS[0]
+
+  it("cover-crops the art into the panel and applies the lighter tint", () => {
+    const { ctx, calls, sets } = makeCtx()
+    const image = { naturalWidth: 1344, naturalHeight: 752, width: 1344, height: 752 } as unknown as HTMLImageElement
+    drawDistrict(ctx, district, 0, image)
+    const draw = drawImageCalls(calls)[0]
+    const [, sx, sy, sw, sh, dx, dy, dw, dh] = draw.args as number[]
+    expect([sy, sh]).toEqual([0, 752])
+    expect(sw / sh).toBeCloseTo(district.w / district.h, 2)
+    expect(sx).toBeGreaterThan(0)
+    expect([dx, dy, dw, dh]).toEqual([district.x, district.y, district.w, district.h])
+    expect(sets.some((s) => s.prop === "fillStyle" && s.value === district.bgColor + DISTRICT_TINT_ALPHA)).toBe(true)
+  })
+
+  it("keeps a strong wash in color-blind mode and a flat fill without art", () => {
+    const cb = makeCtx()
+    const image = { naturalWidth: 1344, naturalHeight: 752 } as unknown as HTMLImageElement
+    drawDistrict(cb.ctx, district, 0, image, true)
+    expect(cb.sets.some((s) => s.prop === "fillStyle" && s.value === district.bgColor + DISTRICT_TINT_ALPHA_COLOR_BLIND)).toBe(true)
+
+    const flat = makeCtx()
+    drawDistrict(flat.ctx, district, 0)
+    expect(drawImageCalls(flat.calls)).toHaveLength(0)
   })
 })

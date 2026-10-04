@@ -2,6 +2,12 @@ import type { MoltbotAgent, District } from "./types"
 import { DISTRICTS } from "./data"
 import { ACCESSORIES } from "./cosmetics"
 import {
+  DISTRICT_BACKGROUNDS,
+  DISTRICT_TINT_ALPHA,
+  DISTRICT_TINT_ALPHA_COLOR_BLIND,
+  getCoverCrop,
+} from "./district-backgrounds"
+import {
   getRobotColorFilter,
   getRobotDrawSize,
   getRobotHeadAnchor,
@@ -102,9 +108,19 @@ export function drawDistrict(
 
   // Draw background image or fallback color
   if (bgImage) {
-    ctx.drawImage(bgImage, d.x, d.y, d.w, d.h)
-    // Semi-transparent overlay to darken and tint with district color
-    ctx.fillStyle = d.bgColor + (colorBlindMode ? "ee" : "cc")
+    // Cover-crop the 16:9 interior so the open floor sits where robots walk.
+    const focus = DISTRICT_BACKGROUNDS[d.id]
+    const crop = getCoverCrop(
+      bgImage.naturalWidth || bgImage.width,
+      bgImage.naturalHeight || bgImage.height,
+      d.w,
+      d.h,
+      focus?.focusX,
+      focus?.focusY,
+    )
+    ctx.drawImage(bgImage, crop.sx, crop.sy, crop.sw, crop.sh, d.x, d.y, d.w, d.h)
+    // Light district tint so the art reads while labels and robots keep contrast.
+    ctx.fillStyle = d.bgColor + (colorBlindMode ? DISTRICT_TINT_ALPHA_COLOR_BLIND : DISTRICT_TINT_ALPHA)
     ctx.fillRect(d.x, d.y, d.w, d.h)
   } else {
     ctx.fillStyle = d.bgColor
@@ -701,20 +717,37 @@ function drawStatusDot(
   ctx.strokeRect(sx, sy, sw, sh)
 }
 
-function drawNameLabel(ctx: CanvasRenderingContext2D, name: string, cx: number, y: number, spriteSize: number, c: string, status: string) {
+function labelText(name: string): string {
+  return name.length > 15 ? `${name.slice(0, 14)}…` : name
+}
+
+function labelWidth(ctx: CanvasRenderingContext2D, name: string): number {
   ctx.font = "bold 10px monospace"
+  return Math.min(112, Math.max(38, ctx.measureText(labelText(name)).width + 16))
+}
+
+function hasProgressBar(agent: Pick<MoltbotAgent, "status" | "taskProgress">): boolean {
+  return agent.status === "working" && agent.taskProgress > 0
+}
+
+/**
+ * Name pill with the status dot; working agents get their task progress as a thin
+ * bar inside the pill, under the text, so it can never cover the name.
+ */
+function drawNameLabel(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, cx: number, top: number, c: string) {
+  const { name, status } = agent
+  const width = labelWidth(ctx, name)
+  const withBar = hasProgressBar(agent)
+  const height = withBar ? NAME_LABEL_HEIGHT_WITH_BAR : NAME_LABEL_HEIGHT
   ctx.textAlign = "center"
-  const label = name.length > 15 ? `${name.slice(0, 14)}…` : name
-  const width = Math.min(112, Math.max(38, ctx.measureText(label).width + 16))
   const left = cx - width / 2
-  const top = y + spriteSize + 1
   const statusColor = status === "error" || status === "offline" ? "#fb7185" : status === "working" ? "#fbbf24" : status === "active" ? "#34d399" : status === "running" ? "#38bdf8" : status === "degraded" ? "#fb923c" : status === "stopped" ? "#64748b" : "#94a3b8"
   ctx.fillStyle = "rgba(2, 6, 23, 0.92)"
   ctx.strokeStyle = `${statusColor}99`
   ctx.lineWidth = 1
   ctx.beginPath()
-  if (typeof ctx.roundRect === "function") ctx.roundRect(left, top, width, 13, 4)
-  else ctx.rect(left, top, width, 13)
+  if (typeof ctx.roundRect === "function") ctx.roundRect(left, top, width, height, 4)
+  else ctx.rect(left, top, width, height)
   ctx.fill()
   ctx.stroke()
   ctx.fillStyle = statusColor
@@ -722,20 +755,15 @@ function drawNameLabel(ctx: CanvasRenderingContext2D, name: string, cx: number, 
   ctx.arc(left + 7, top + 6.5, 2, 0, Math.PI * 2)
   ctx.fill()
   ctx.fillStyle = "#f8fafc"
-  ctx.fillText(label, cx + 3, top + 9.5, width - 15)
+  ctx.fillText(labelText(name), cx + 3, top + 9.5, width - 15)
   ctx.textAlign = "left"
-}
-
-function drawTaskProgressBar(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, cx: number, y: number, spriteSize: number, c: string) {
-  const barW = 28
-  const barH = 3
-  const barX = cx - barW / 2
-  const barY = y + spriteSize + 8
-  drawRect(ctx, barX, barY, barW, barH, "#0a0e17")
-  drawRect(ctx, barX, barY, Math.floor(barW * agent.taskProgress / 100), barH, c)
-  ctx.strokeStyle = c + "44"
-  ctx.lineWidth = 0.5
-  ctx.strokeRect(barX, barY, barW, barH)
+  if (withBar) {
+    const barX = left + 5
+    const barW = width - 10
+    const barY = top + 13
+    drawRect(ctx, barX, barY, barW, 2, "#1e293b")
+    drawRect(ctx, barX, barY, Math.floor((barW * Math.min(100, agent.taskProgress)) / 100), 2, c)
+  }
 }
 
 function drawCloudBadge(ctx: CanvasRenderingContext2D, drawX: number, drawY: number) {
@@ -863,31 +891,63 @@ export function drawBot(ctx: CanvasRenderingContext2D, agent: MoltbotAgent, tick
   }
 
   drawStatusDot(ctx, agent.status, overlayX, overlayY, overlaySize, colorBlindMode)
-  // Collision offset from resolveLabelOffsets, so nearby agents' names do not overlap.
-  const labelOffsetY = (agent as MoltbotAgent & { labelOffsetY?: number }).labelOffsetY ?? 0
-  drawNameLabel(ctx, agent.name, cx, y + labelOffsetY, spriteSize, c, agent.status)
 
   if (agent.deployment === "cloud") {
     drawCloudBadge(ctx, overlayX, overlayY)
   }
 
-  if (agent.status === "working" && agent.taskProgress > 0) {
-    drawTaskProgressBar(ctx, agent, cx, y + labelOffsetY, spriteSize, c)
+  // The city canvas defers labels to a final pass (drawAgentLabel) so no sprite
+  // drawn later can cover a name; standalone previews draw it right here.
+  if (!(agent as MoltbotAgent & { deferLabel?: boolean }).deferLabel) {
+    drawAgentLabel(ctx, agent)
   }
 }
 
-/** Name label size as drawn by drawBot (font must match drawNameLabel). */
+/** Name label heights as drawn by drawNameLabel (font: bold 10px monospace). */
 export const NAME_LABEL_HEIGHT = 13
+export const NAME_LABEL_HEIGHT_WITH_BAR = 17
+/** Label top sits 1px under the legacy 48px sprite box: y + 48 + 1. */
+const LABEL_TOP_OFFSET = 49
 
+/**
+ * Draws an agent's name label (with its progress bar when working), shifted by
+ * the collision offset `labelOffsetY` set by the city canvas.
+ */
+export function drawAgentLabel(ctx: CanvasRenderingContext2D, agent: MoltbotAgent) {
+  const labelOffsetY = (agent as MoltbotAgent & { labelOffsetY?: number }).labelOffsetY ?? 0
+  const top = Math.round(agent.pixelY) + LABEL_TOP_OFFSET + labelOffsetY
+  drawNameLabel(ctx, agent, Math.round(agent.pixelX) + 8, top, agent.color)
+}
+
+/** Label rect (x = center) before collision offsets, matching drawAgentLabel. */
 export function getNameLabelBox(
   ctx: CanvasRenderingContext2D,
-  agent: Pick<MoltbotAgent, "id" | "name" | "pixelX" | "pixelY">,
+  agent: Pick<MoltbotAgent, "id" | "name" | "pixelX" | "pixelY" | "status" | "taskProgress">,
 ): { id: string; x: number; y: number; width: number; height: number } {
-  ctx.font = "bold 10px monospace"
-  const label = agent.name.length > 15 ? `${agent.name.slice(0, 14)}…` : agent.name
-  const width = Math.min(112, Math.max(38, ctx.measureText(label).width + 16))
-  // Mirrors drawBot: cx = x + 8, label top = y + spriteSize (48) + 1.
-  return { id: agent.id, x: Math.round(agent.pixelX) + 8, y: Math.round(agent.pixelY) + 49, width, height: NAME_LABEL_HEIGHT }
+  return {
+    id: agent.id,
+    x: Math.round(agent.pixelX) + 8,
+    y: Math.round(agent.pixelY) + LABEL_TOP_OFFSET,
+    width: labelWidth(ctx, agent.name),
+    height: hasProgressBar(agent) ? NAME_LABEL_HEIGHT_WITH_BAR : NAME_LABEL_HEIGHT,
+  }
+}
+
+/**
+ * Screen box (x = center) a robot occupies, matching drawBot's placement with a
+ * small margin for the walk bob; used as an obstacle for label placement.
+ */
+export function getAgentSpriteBox(
+  agent: Pick<MoltbotAgent, "id" | "pixelX" | "pixelY">,
+  set?: Pick<RobotSpriteSet, "frameWidth" | "frameHeight">,
+): { id: string; x: number; y: number; width: number; height: number } {
+  const x = Math.round(agent.pixelX)
+  const y = Math.round(agent.pixelY)
+  const feetY = y - 4 + 48
+  if (!set) return { id: agent.id, x: x + 8, y: y - 7, width: 42, height: 51 }
+  const { width, height } = getRobotDrawSize(set)
+  // Only the body counts; the outer quarter of the cell width is mostly empty.
+  return { id: agent.id, x: x + 8, y: feetY - height - 3, width: Math.round(width * 0.75), height: height + 3 }
 }
 
 export function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number) {
