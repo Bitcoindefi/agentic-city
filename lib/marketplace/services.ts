@@ -1,6 +1,7 @@
 import { DISTRICTS, createAgents } from '@/lib/data'
 import type { DistrictId } from '@/lib/types'
 import { STELLAR_ENABLED } from '@/lib/config/chains'
+import { getRobotStillPath } from '@/lib/robot-sprites'
 
 export type ServiceCapability = 'data' | 'comms' | 'processing' | 'defense' | 'research'
 export type ServiceStatus = 'online' | 'offline'
@@ -29,16 +30,6 @@ export interface MarketplaceService {
   receiptHistory: Array<{ id: string; agent: string; amountXlm: number; settledAt: string; latencyMs: number }>
   uptime: Array<{ label: string; value: number }>
 }
-
-const spritePaths = [
-  '/sprites/robot-blue.gif',
-  '/sprites/robot-green.gif',
-  '/sprites/robot-gold.gif',
-  '/sprites/robot-tv.gif',
-  '/sprites/robot-tank.gif',
-  '/sprites/robot-runner.gif',
-  '/sprites/robot-heavy.webp',
-]
 
 const baseServices: Array<Omit<MarketplaceService, 'providerAgent'>> = [
   {
@@ -162,7 +153,7 @@ export function listMarketplaceServices(): MarketplaceService[] {
       providerAgent: {
         id: agent.id,
         name: agent.name,
-        sprite: spritePaths[agent.spriteId % spritePaths.length],
+        sprite: getRobotStillPath(agent.district),
         color: agent.color,
       },
     }

@@ -15,6 +15,7 @@ import {
 } from "@/lib/cosmetics"
 import { drawBot } from "@/lib/renderer"
 import { SPRITE_CONFIGS } from "@/components/pixel-city"
+import { getDistrictRobot, getRobotFrameIndex, shouldAnimateRobot } from "@/lib/robot-sprites"
 import { STELLAR_ENABLED } from "@/lib/config/chains"
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/
@@ -36,8 +37,10 @@ async function getFreighter() {
 function PreviewCanvas({ agent }: { agent: MoltbotAgent }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [sprite, setSprite] = useState<HTMLImageElement | null>(null)
+  const [robotSheet, setRobotSheet] = useState<HTMLImageElement | null>(null)
   const tickRef = useRef(0)
   const cfg = SPRITE_CONFIGS[agent.spriteId % SPRITE_CONFIGS.length]
+  const robotSet = getDistrictRobot(agent.district)
 
   useEffect(() => {
     const img = new Image()
@@ -47,8 +50,20 @@ function PreviewCanvas({ agent }: { agent: MoltbotAgent }) {
   }, [cfg.path])
 
   useEffect(() => {
+    let cancelled = false
+    const img = new Image()
+    img.onload = () => {
+      if (!cancelled) setRobotSheet(img)
+    }
+    img.src = robotSet.sheet
+    return () => {
+      cancelled = true
+    }
+  }, [robotSet.sheet])
+
+  useEffect(() => {
     let raf = 0
-    const render = () => {
+    const render = (now: number) => {
       const canvas = canvasRef.current
       const ctx = canvas?.getContext("2d")
       if (canvas && ctx) {
@@ -57,13 +72,21 @@ function PreviewCanvas({ agent }: { agent: MoltbotAgent }) {
         ctx.fillRect(0, 0, canvas.width, canvas.height)
         tickRef.current += 1
         const previewAgent: MoltbotAgent = { ...agent, pixelX: 50, pixelY: 22, direction: "right" }
-        drawBot(ctx, previewAgent, tickRef.current, false, sprite ?? undefined, cfg.crop)
+        // Only use the loaded strip if it belongs to this agent's district robot.
+        const robot = robotSheet && robotSheet.src.endsWith(robotSet.sheet)
+          ? {
+              image: robotSheet,
+              set: robotSet,
+              frame: getRobotFrameIndex(now, robotSet.frames, robotSet.frameMs, shouldAnimateRobot(agent.status, false)),
+            }
+          : undefined
+        drawBot(ctx, previewAgent, tickRef.current, false, sprite ?? undefined, cfg.crop, false, robot)
       }
       raf = requestAnimationFrame(render)
     }
     raf = requestAnimationFrame(render)
     return () => cancelAnimationFrame(raf)
-  }, [agent, sprite, cfg.crop])
+  }, [agent, sprite, cfg.crop, robotSheet, robotSet])
 
   return (
     <canvas

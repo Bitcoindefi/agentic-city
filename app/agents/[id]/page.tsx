@@ -22,6 +22,7 @@ import { getReputation } from "@/lib/reputation/reputation-store"
 import { getQuests } from "@/lib/gamification/quests"
 import { getAgentXpHistory } from "@/lib/agents/xp-decay"
 import { DISTRICTS } from "@/lib/data"
+import { getRobotStillPath } from "@/lib/robot-sprites"
 
 type AgentPageProps = {
   params: Promise<{ id: string }>
@@ -262,6 +263,9 @@ export default async function AgentPage({ params }: AgentPageProps) {
     const distObj = DISTRICTS.find((d: any) => d.id === agentMetadata.district)
     if (distObj) districtName = distObj.name
   }
+  // District robot portrait: prefer the local agent's district id, then the metadata.
+  const metadataDistrictId = typeof agentMetadata.district === 'string' ? agentMetadata.district : agentMetadata.district?.id
+  const robotStill = getRobotStillPath(localAgent?.district ?? metadataDistrictId)
 
   return (
     <main className="min-h-screen bg-[#030712] px-4 py-8 text-slate-100 sm:px-6 lg:px-8">
@@ -277,7 +281,7 @@ export default async function AgentPage({ params }: AgentPageProps) {
         <Card className="bg-slate-950/80 border-slate-800 shadow-[0_24px_80px_rgba(2,8,23,0.45)]">
           <CardHeader className="flex flex-col sm:flex-row items-center gap-6 pb-6">
             <Avatar className="h-24 w-24 border-2 border-slate-800 bg-slate-900 flex-shrink-0">
-              <AvatarImage src={`/sprites/robot-blue.gif`} alt={agentName} className="object-cover" />
+              <AvatarImage src={robotStill} alt={agentName} className="object-contain p-1" />
               <AvatarFallback className="bg-slate-800 text-2xl font-mono text-cyan-300">{initials}</AvatarFallback>
             </Avatar>
             <div className="flex flex-col gap-2 items-center sm:items-start flex-1 text-center sm:text-left">
