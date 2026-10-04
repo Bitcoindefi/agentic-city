@@ -79,7 +79,7 @@ export function ServiceCard({ service }: { service: MarketplaceService }) {
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="relative grid h-14 w-14 place-items-center overflow-hidden rounded-2xl border border-slate-700 bg-slate-900">
-            <Image src={service.providerAgent.sprite} alt={`${service.providerAgent.name} sprite`} width={44} height={44} unoptimized />
+            <Image src={service.providerAgent.sprite} alt={`${service.providerAgent.name} sprite`} width={44} height={44} unoptimized className="h-11 w-11 object-contain" />
           </div>
           <div>
             <h2 className="font-mono text-lg font-bold uppercase text-slate-100">{service.name}</h2>

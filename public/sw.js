@@ -1,4 +1,5 @@
-const CACHE_VERSION = "agentic-city-pwa-v2"
+// v3: new skyline/district art and robot sprites; the bump evicts cached v2 images.
+const CACHE_VERSION = "agentic-city-pwa-v3"
 const APP_SHELL = [
   "/offline",
   "/manifest.webmanifest",
@@ -6,12 +7,12 @@ const APP_SHELL = [
   "/apple-icon.png",
   "/icon-light-32x32.png",
   "/icon-dark-32x32.png",
-  "/bg-city.gif",
-  "/bg-data-center.jpg",
-  "/bg-comm-hub.jpg",
-  "/bg-processing.jpg",
-  "/bg-defense.jpg",
-  "/bg-research.jpg",
+  "/bg-city.webp",
+  "/bg-data-center.webp",
+  "/bg-comm-hub.webp",
+  "/bg-processing.webp",
+  "/bg-defense.webp",
+  "/bg-research.webp",
 ]
 
 self.addEventListener("install", (event) => {

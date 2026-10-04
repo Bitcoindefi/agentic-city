@@ -51,7 +51,7 @@ export function FeedItem({ event, compact = false }: { event: FeedEvent; compact
         }}
       >
         {sprite ? (
-          <Image src={sprite} alt="" width={compact ? 28 : 38} height={compact ? 28 : 38} unoptimized />
+          <Image src={sprite} alt="" width={compact ? 28 : 38} height={compact ? 28 : 38} unoptimized style={{ objectFit: "contain" }} />
         ) : (
           <span style={{ color: accent, fontFamily: "monospace", fontSize: compact ? 14 : 18 }}>#</span>
         )}

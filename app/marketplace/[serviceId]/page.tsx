@@ -49,7 +49,7 @@ console.log(result.data)`
           <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
             <div className="flex gap-4">
               <div className="grid h-20 w-20 place-items-center overflow-hidden rounded-3xl border border-slate-700 bg-slate-900">
-                <Image src={service.providerAgent.sprite} alt={`${service.providerAgent.name} sprite`} width={60} height={60} unoptimized />
+                <Image src={service.providerAgent.sprite} alt={`${service.providerAgent.name} sprite`} width={60} height={60} unoptimized className="h-[60px] w-[60px] object-contain" />
               </div>
               <div>
                 <div className="mb-2 flex flex-wrap gap-2">

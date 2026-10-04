@@ -1,21 +1,12 @@
 import { DISTRICTS, createAgents } from "@/lib/data"
 import type { District, DistrictId, MoltbotAgent } from "@/lib/types"
 import { formatAssetAmount } from "@/lib/config/chains"
+import { getRobotStillPath } from "@/lib/robot-sprites"
 
 export const AGENT_OG_SIZE = {
   width: 1200,
   height: 630,
 } as const
-
-export const AGENT_SPRITE_PATHS = [
-  "/sprites/robot-blue.gif",
-  "/sprites/robot-gold.gif",
-  "/sprites/robot-green.gif",
-  "/sprites/robot-heavy.webp",
-  "/sprites/robot-runner.gif",
-  "/sprites/robot-tank.gif",
-  "/sprites/robot-tv.gif",
-] as const
 
 export const DISTRICT_BACKGROUND_PATHS: Record<DistrictId, string> = {
   "data-center": "/bg-data-center.jpg",
@@ -159,8 +150,9 @@ export function getDistrictOgPath(district: District): string {
   return `/api/og/district/${district.id}`
 }
 
-export function getAgentSpritePath(agent: MoltbotAgent): string {
-  return AGENT_SPRITE_PATHS[agent.spriteId % AGENT_SPRITE_PATHS.length]
+/** Transparent still of the agent's district robot (PNG, safe for satori OG cards). */
+export function getAgentSpritePath(agent: Pick<MoltbotAgent, "district">): string {
+  return getRobotStillPath(agent.district)
 }
 
 export function formatAgentShareText(agent: MoltbotAgent): string {

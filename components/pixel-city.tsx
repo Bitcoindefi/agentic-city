@@ -4,18 +4,24 @@ import { useRef, useEffect, useCallback, useState, useMemo } from "react"
 import NextImage from "next/image"
 import { LocateFixed, Map as MapIcon, Minus, Plus } from "lucide-react"
 import type { MoltbotAgent, District } from "@/lib/types"
-import { drawGrid, drawRoads, drawDistrict, drawBot } from "@/lib/renderer"
+import { drawGrid, drawRoads, drawDistrict, drawBot, drawAgentLabel, getAgentSpriteBox, getNameLabelBox } from "@/lib/renderer"
+import { resolveLabelOffsets } from "@/lib/label-layout"
 import type { DistrictStanding } from "@/lib/gamification/events"
 import { ParticleSystem, type ParticleEvent, type ParticleOpts } from "@/lib/renderer/particles"
 import type { CityAudioEngine } from "@/lib/audio/city-audio"
+import {
+  ROBOT_FRAME_MS,
+  ROBOT_SPRITE_SETS,
+  getDistrictRobot,
+  getRobotFrameIndex,
+  robotPhaseFor,
+  shouldAnimateRobot,
+} from "@/lib/robot-sprites"
+import { CITY_BACKGROUND, DISTRICT_BACKGROUNDS } from "@/lib/district-backgrounds"
 
-const BG_IMAGES: Record<string, string> = {
-  "data-center": "/bg-data-center.jpg",
-  "comm-hub": "/bg-comm-hub.jpg",
-  processing: "/bg-processing.jpg",
-  defense: "/bg-defense.jpg",
-  research: "/bg-research.jpg",
-}
+const BG_IMAGES: Record<string, string> = Object.fromEntries(
+  Object.entries(DISTRICT_BACKGROUNDS).map(([id, bg]) => [id, bg.webp]),
+)
 
 export interface SpriteConfig {
   path: string
@@ -32,6 +38,8 @@ export interface FloatingOverlay {
   duration: number
 }
 
+// Legacy tinted sprite set. The map now draws the per-district robots from
+// lib/robot-sprites.ts; these stay as the fallback while (or if) a sheet fails to load.
 export const SPRITE_CONFIGS: SpriteConfig[] = [
   { path: "/sprites/robot-tv.gif" },
   { path: "/sprites/robot-tank.gif" },
@@ -198,6 +206,8 @@ export function PixelCity({
   const [images, setImages] = useState<Record<string, HTMLImageElement>>({})
   const [sprites, setSprites] = useState<HTMLImageElement[]>([])
   const spriteCrops = useRef<(([number, number, number, number]) | undefined)[]>([])
+  const [robotSheets, setRobotSheets] = useState<Record<string, HTMLImageElement>>({})
+  const [robotClock, setRobotClock] = useState(0)
   const [hoveredAgent, setHoveredAgent] = useState<MoltbotAgent | null>(null)
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null)
   const [focusedAgentId, setFocusedAgentId] = useState<string | null>(null)
@@ -338,6 +348,28 @@ export function PixelCity({
       img.src = cfg.path
     })
   }, [])
+
+  // District robot strips load independently so a slow sheet never blocks the map.
+  useEffect(() => {
+    let cancelled = false
+    for (const set of ROBOT_SPRITE_SETS) {
+      const img = new Image()
+      img.onload = () => {
+        if (!cancelled) setRobotSheets((prev) => ({ ...prev, [set.district]: img }))
+      }
+      img.src = set.sheet
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Walk-cycle clock for the robot strips. Skipped under reduced motion.
+  useEffect(() => {
+    if (reduceMotion || Object.keys(robotSheets).length === 0) return
+    const id = window.setInterval(() => setRobotClock(performance.now()), ROBOT_FRAME_MS)
+    return () => window.clearInterval(id)
+  }, [reduceMotion, robotSheets])
 
   const resizeCanvas = useCallback(() => {
     const canvas = canvasRef.current
@@ -498,6 +530,15 @@ export function PixelCity({
     )
 
     const sorted = [...agents].sort((a, b) => a.pixelY - b.pixelY)
+    // Push overlapping name labels apart (and off robot bodies) once per frame.
+    const labelOffsets = resolveLabelOffsets(
+      sorted.map((agent) => getNameLabelBox(ctx, agent)),
+      sorted.map((agent) => {
+        const set = getDistrictRobot(agent.district)
+        return getAgentSpriteBox(agent, robotSheets[set.district] ? set : undefined)
+      }),
+    )
+    const labelPass: MoltbotAgent[] = []
     for (const agent of sorted) {
       const spriteIdx = agent.spriteId % sprites.length
       const agentSprite = sprites[spriteIdx] || sprites[0]
@@ -506,9 +547,30 @@ export function PixelCity({
         ...agent,
         leaderboardRank: topGlobalRanks.get(agent.id),
         isDistrictLeader: districtLeaderIds.has(agent.id),
+        labelOffsetY: labelOffsets.get(agent.id) ?? 0,
+        deferLabel: true,
       }
-      drawBot(ctx, enriched, tick, agent.id === selectedAgentId, agentSprite, crop, colorBlindMode)
+      labelPass.push(enriched)
+      const robotSet = getDistrictRobot(agent.district)
+      const robotImage = robotSheets[robotSet.district]
+      const isMoving = Math.hypot(agent.targetX - agent.pixelX, agent.targetY - agent.pixelY) > 1.5
+      const robot = robotImage
+        ? {
+            image: robotImage,
+            set: robotSet,
+            frame: getRobotFrameIndex(
+              robotClock,
+              robotSet.frames,
+              robotSet.frameMs,
+              shouldAnimateRobot(agent.status, isMoving, reduceMotion),
+              robotPhaseFor(agent.id),
+            ),
+          }
+        : undefined
+      drawBot(ctx, enriched, tick, agent.id === selectedAgentId, agentSprite, crop, colorBlindMode, robot)
     }
+    // Final pass: names above every sprite.
+    for (const agent of labelPass) drawAgentLabel(ctx, agent)
 
     if (!reduceMotion) {
       const now = Date.now()
@@ -550,7 +612,11 @@ export function PixelCity({
     if (showMinimap) {
       drawMinimap(ctx, w, h, districts, agents, zoom, panOffset, cityBounds, minimapScale, colorBlindMode)
     }
+  }, [agents, districts, selectedAgentId, tick, images, sprites, robotSheets, robotClock, txAnimations, reduceMotion, zoom, panOffset, showMinimap, cityBounds, minimapScale, colorBlindMode, districtStandings])
 
+  // District audio focus follows agent presence. Kept out of the draw effect so the
+  // robot walk clock (every ROBOT_FRAME_MS) does not keep rescheduling gain ramps.
+  useEffect(() => {
     if (audioEngine) {
       const weights = new Map<string, number>()
       for (const d of districts) weights.set(d.id, 0)
@@ -569,7 +635,7 @@ export function PixelCity({
         audioEngine.setDistrictFocus(d.id, volume)
       }
     }
-  }, [agents, districts, selectedAgentId, tick, images, sprites, txAnimations, reduceMotion, audioEngine, zoom, panOffset, showMinimap, cityBounds, minimapScale, colorBlindMode, districtStandings])
+  }, [agents, districts, audioEngine])
 
   const hitTestAgent = useCallback(
     (mx: number, my: number): MoltbotAgent | null => {
@@ -796,14 +862,16 @@ export function PixelCity({
 
   return (
     <div ref={containerRef} style={{ width: "100%", height: "100%", position: "relative", overflow: "hidden" }}>
-      {/* Full-viewport animated city GIF background */}
+      {/* Full-viewport night skyline. Static art; a slow drift and a faint window
+          twinkle (CSS, disabled under reduced motion) keep it alive cheaply. */}
       <NextImage
-        src="/bg-city.gif"
+        src={CITY_BACKGROUND}
         alt=""
         aria-hidden="true"
         unoptimized
         fill
         sizes="100vw"
+        className="city-bg-drift"
         style={{
           position: "absolute",
           top: 0,
@@ -816,6 +884,7 @@ export function PixelCity({
           imageRendering: "pixelated",
         }}
       />
+      <div aria-hidden="true" className="city-bg-twinkle" />
       <canvas
         ref={canvasRef}
         role="img"

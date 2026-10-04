@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useSyncExternalStore } from "react"
 import { ChevronDown, ChevronUp, Trophy } from "lucide-react"
 import Link from "next/link"
 import type { ActiveDistrictEvent, DistrictStanding } from "@/lib/gamification/events"
@@ -20,11 +20,17 @@ function formatCountdown(seconds: number): string {
   return `${hours}h ${minutes}m`
 }
 
+const noopSubscribe = () => () => {}
+
 export function DistrictEventOverlay({ event, standings, top = 12 }: DistrictEventOverlayProps) {
   const [expanded, setExpanded] = useState(false)
+  // Standings can differ between the server render and the browser (the server
+  // and client agent rosters drift), which made React throw a hydration error and
+  // regenerate the whole map tree. Show the leader only once on the client.
+  const isClient = useSyncExternalStore(noopSubscribe, () => true, () => false)
   if (!event) return null
 
-  const leader = standings[0]
+  const leader = isClient ? standings[0] : undefined
 
   return (
     <section
