@@ -210,6 +210,29 @@ export function getAgentHealth(agentId: string, nowMs = Date.now()): AgentHealth
   }
 }
 
+export type AgentPresenceStatus = "healthy" | "offline" | "unknown"
+
+export function getAgentPresence(agentId: string, nowMs = Date.now()): AgentPresenceStatus {
+  const health = getAgentHealth(agentId, nowMs)
+  if (!health) {
+    return "unknown"
+  }
+  if (health.status === "healthy") {
+    return "healthy"
+  }
+  return "offline"
+}
+
+export function getBulkAgentPresence(agentIds: string[], nowMs = Date.now()): Record<string, AgentPresenceStatus> {
+  const presence: Record<string, AgentPresenceStatus> = {}
+  for (const rawId of agentIds) {
+    const id = String(rawId).trim()
+    if (!id) continue
+    presence[id] = getAgentPresence(id, nowMs)
+  }
+  return presence
+}
+
 export function listAgentHealth(nowMs = Date.now()): AgentHealthSnapshot[] {
   return Array.from(db.values())
     .map((record) => toSnapshot(record, nowMs))

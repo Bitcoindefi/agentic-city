@@ -2,9 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react"
 import Link from "next/link"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { AgentsRegistry } from "@/components/agents-registry"
 import type { AgentCapabilityManifest, CapabilityCount } from "@/lib/agent-registry"
 
 export default function RegistryPage() {
@@ -125,64 +124,7 @@ export default function RegistryPage() {
               {filtered.length} agent{filtered.length !== 1 ? "s" : ""}
               {filter ? ` matching "${filter}"` : ""}
             </p>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {filtered.map((agent) => (
-                <Link key={agent.agentId} href={`/agents/${encodeURIComponent(agent.agentId)}`}>
-                  <Card className="h-full bg-slate-950/80 border-slate-800 transition hover:border-slate-600">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="font-mono text-sm text-slate-100 truncate">
-                        {agent.agentId}
-                      </CardTitle>
-                      <div className="flex items-center gap-2">
-                        <span className={`h-2 w-2 rounded-full ${
-                          agent.status === "active" ? "bg-emerald-400" :
-                          agent.status === "working" ? "bg-cyan-400" :
-                          agent.status === "idle" ? "bg-amber-400" :
-                          agent.status === "degraded" ? "bg-rose-400" :
-                          "bg-slate-600"
-                        }`} />
-                        <span className="font-mono text-xs text-slate-400">{agent.status}</span>
-                        {agent.degraded && (
-                          <Badge variant="outline" className="border-rose-500/60 bg-rose-950/40 px-1.5 py-0 text-[10px] uppercase text-rose-300">
-                            Degraded
-                          </Badge>
-                        )}
-                        <span className="ml-auto font-mono text-xs text-slate-500">{agent.district}</span>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="pt-0">
-                      <div className="mb-3 rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1 font-mono text-xs text-slate-400">
-                        Errors 24h: <span className={agent.degraded ? "text-rose-300" : "text-slate-200"}>{agent.errorCount24h ?? 0}</span>
-                        {agent.degraded && <span className="ml-2 text-rose-300">Callable with warning</span>}
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        {agent.capabilities.slice(0, 5).map((cap) => {
-                          const isMatch = filter && cap.toLowerCase().includes(filter.trim().toLowerCase())
-                          return (
-                            <Badge
-                              key={cap}
-                              variant="outline"
-                              className={`px-2 py-0.5 text-xs ${
-                                isMatch
-                                  ? "border-cyan-500/60 bg-cyan-900/30 text-cyan-300"
-                                  : "border-slate-700 bg-slate-900/50 text-slate-400"
-                              }`}
-                            >
-                              {cap}
-                            </Badge>
-                          )
-                        })}
-                        {agent.capabilities.length > 5 && (
-                          <Badge variant="outline" className="border-slate-700 bg-slate-900/50 px-2 py-0.5 text-xs text-slate-500">
-                            +{agent.capabilities.length - 5}
-                          </Badge>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              ))}
-            </div>
+            <AgentsRegistry agents={filtered} filter={filter} />
           </section>
         )}
       </div>
