@@ -14,6 +14,8 @@ export interface SkillRegistration {
 
 export interface AgentCapabilityManifest {
   agentId: string
+  email?: string
+  emailOptOut?: boolean
   model: string
   district: DistrictId
   capabilities: string[]
@@ -70,6 +72,15 @@ function normalizeString(value: unknown, field: string): string {
     throw new Error(`${field} must be a non-empty string`)
   }
   return value.trim()
+}
+
+function normalizeOptionalEmail(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  const email = normalizeString(value, "email").toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("email must be a valid email address")
+  }
+  return email
 }
 
 function normalizeDistrict(value: unknown): DistrictId {
@@ -227,11 +238,14 @@ export function registerAgent(input: unknown): AgentCapabilityManifest {
 
   const now = new Date().toISOString()
   const agentId = normalizeString(input.agentId, "agentId")
+  const email = normalizeOptionalEmail(input.email)
   const dependencies = normalizeDependencies(input.dependencies)
   validateDependencies(agentId, dependencies ?? [])
 
   const agent: AgentCapabilityManifest = {
     agentId,
+    ...(email === undefined ? {} : { email }),
+    ...(input.emailOptOut === undefined ? {} : { emailOptOut: input.emailOptOut === true }),
     model: normalizeString(input.model, "model"),
     district: normalizeDistrict(input.district),
     capabilities: normalizeCapabilities(input.capabilities),

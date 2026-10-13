@@ -105,6 +105,24 @@ async function sendReactEmail(subject: string, to: string, react: React.ReactNod
   return { skipped: false, data }
 }
 
+export async function sendRawEmail(options: { to: string; subject: string; text: string; html: string }) {
+  if (!process.env.RESEND_API_KEY) {
+    return { skipped: true, reason: "RESEND_API_KEY is not configured" }
+  }
+
+  const resend = new Resend(process.env.RESEND_API_KEY)
+  const { data, error } = await resend.emails.send({
+    from: fromAddress(),
+    to: options.to,
+    subject: options.subject,
+    text: options.text,
+    html: options.html,
+  })
+
+  if (error) throw new Error(error.message)
+  return { skipped: false, data }
+}
+
 function BadgeUnlockedEmail({ agentName, badgeName, badgeRarity, unsubscribeUrl }: BadgeUnlockedEmailInput) {
   return React.createElement(
     "div",
