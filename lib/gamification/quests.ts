@@ -1,7 +1,8 @@
 import { addNotification } from "@/lib/notifications/notification-store"
 import { invalidateLeaderboardCache } from "./leaderboard-cache"
-import { listStoredQuests } from "./quest-store"
+import { listStoredQuests, type StoredQuest } from "./quest-store"
 import { PAYMENT_ASSET } from "@/lib/config/chains"
+import { emitEvent } from "@/lib/events/system-events"
 
 export type QuestType = "daily" | "weekly" | "story"
 
@@ -390,4 +391,127 @@ export function recordCompletedQuestNotifications(agentId: string, quests: Quest
   if (anyCompleted) {
     invalidateLeaderboardCache()
   }
+}
+
+export const DEFAULT_QUEST_EXPIRY_WARNING_MS = 86400000 // 24 hours
+
+export function getQuestExpiryWarningThresholdMs(): number {
+  const envVal = process.env.QUEST_EXPIRY_WARNING_MS
+  if (envVal) {
+    const parsed = Number(envVal)
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed
+    }
+  }
+  return DEFAULT_QUEST_EXPIRY_WARNING_MS
+}
+
+export interface QuestExpiryWarning {
+  questId: string
+  agentId: string
+  expiresAt: string
+  remainingMs: number
+}
+
+export interface CheckQuestExpirationOptions {
+  agentId?: string
+  now?: Date
+  thresholdMs?: number
+  quests?: (Quest | StoredQuest)[]
+}
+
+export function checkQuestExpiration(
+  optionsOrAgentId?: string | CheckQuestExpirationOptions,
+  maybeNow?: Date,
+  maybeThresholdMs?: number,
+): QuestExpiryWarning[] {
+  let agentId: string | undefined
+  let now = new Date()
+  let thresholdMs = getQuestExpiryWarningThresholdMs()
+  let customQuests: (Quest | StoredQuest)[] | undefined
+
+  if (typeof optionsOrAgentId === "object" && optionsOrAgentId !== null) {
+    agentId = optionsOrAgentId.agentId
+    if (optionsOrAgentId.now) now = optionsOrAgentId.now
+    if (optionsOrAgentId.thresholdMs !== undefined) thresholdMs = optionsOrAgentId.thresholdMs
+    customQuests = optionsOrAgentId.quests
+  } else if (typeof optionsOrAgentId === "string") {
+    agentId = optionsOrAgentId
+    if (maybeNow) now = maybeNow
+    if (maybeThresholdMs !== undefined) thresholdMs = maybeThresholdMs
+  }
+
+  const nowMs = now.getTime()
+  const candidateQuests: (Quest | StoredQuest)[] = customQuests ?? [
+    ...listStoredQuests({ includeExpired: false }),
+    ...getQuests(now),
+  ]
+
+  const seenIds = new Set<string>()
+  const uniqueQuests: (Quest | StoredQuest)[] = []
+  for (const q of candidateQuests) {
+    if (!seenIds.has(q.id)) {
+      seenIds.add(q.id)
+      uniqueQuests.push(q)
+    }
+  }
+
+  const warnings: QuestExpiryWarning[] = []
+
+  for (const quest of uniqueQuests) {
+    if (quest.status === "completed" || quest.status === "expired") continue
+    if (!quest.expiresAt) continue
+
+    const expiresAtMs = new Date(quest.expiresAt).getTime()
+    const remainingMs = expiresAtMs - nowMs
+
+    if (remainingMs > 0 && remainingMs < thresholdMs) {
+      let targetAgents: string[] = []
+      if (agentId) {
+        targetAgents = [agentId]
+      } else if (
+        "assignedAgentIds" in quest &&
+        Array.isArray(quest.assignedAgentIds) &&
+        quest.assignedAgentIds.length > 0
+      ) {
+        targetAgents = quest.assignedAgentIds
+      } else if (quest.subTasks && quest.subTasks.length > 0) {
+        const subtaskAgents = quest.subTasks
+          .map((st) => st.assignedAgentId?.trim())
+          .filter(Boolean) as string[]
+        targetAgents = Array.from(new Set(subtaskAgents))
+      }
+
+      for (const targetAgentId of targetAgents) {
+        emitEvent("quest.expired", {
+          questId: quest.id,
+          agentId: targetAgentId,
+          expiresAt: quest.expiresAt,
+          remainingMs,
+        })
+
+        addNotification({
+          agentId: targetAgentId,
+          type: "quest_expired",
+          questId: quest.id,
+          expiresAt: quest.expiresAt,
+          remainingMs,
+          title: "Quest expiring soon",
+          body: `Quest "${quest.title}" has less than 24h remaining.`,
+          resourceHref: `/?quest=${encodeURIComponent(quest.id)}`,
+          resourceLabel: quest.title,
+          dedupeKey: `quest_expiry_warning:${targetAgentId}:${quest.id}:${quest.expiresAt}`,
+        })
+
+        warnings.push({
+          questId: quest.id,
+          agentId: targetAgentId,
+          expiresAt: quest.expiresAt,
+          remainingMs,
+        })
+      }
+    }
+  }
+
+  return warnings
 }

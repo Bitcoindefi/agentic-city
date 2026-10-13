@@ -51,6 +51,7 @@ export type SystemEvent =
   })
   | (BaseEvent & { type: "quest.expired"; agentId: string; questId: string; completedSubtasks: number; totalSubtasks: number })
   | (BaseEvent & { type: "quest.expired"; questId: string; quest: Quest })
+  | (BaseEvent & { type: "quest.expired"; questId: string; agentId?: string; expiresAt?: string; remainingMs?: number })
   | (BaseEvent & { type: "quest.abandoned"; questId: string; quest: Quest })
   | (BaseEvent & { type: "quest.unlocked"; agentId: string; questId: string })
   | (BaseEvent & { type: "agent.xp"; agentId: string; xp: number; totalXp?: number; level: number; xpToNext?: number; reason?: string })
@@ -138,6 +139,10 @@ export function publishSystemEvent(event: SystemEvent): PublishedSystemEvent {
     listener(published)
   }
   return published
+}
+
+export function emitEvent(type: string, payload: Record<string, any>): PublishedSystemEvent {
+  return publishSystemEvent({ type, ...payload } as unknown as SystemEvent)
 }
 
 export function listPublishedSystemEvents(): PublishedSystemEvent[] {

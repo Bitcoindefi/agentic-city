@@ -16,17 +16,23 @@ export interface NotificationRecord {
   createdAt: string
   readAt: string | null
   dedupeKey?: string
+  questId?: string
+  expiresAt?: string
+  remainingMs?: number
 }
 
 export interface AddNotificationInput {
   agentId: string
   type: NotificationType
-  title: string
-  body: string
-  resourceHref: string
-  resourceLabel: string
+  title?: string
+  body?: string
+  resourceHref?: string
+  resourceLabel?: string
   createdAt?: string
   dedupeKey?: string
+  questId?: string
+  expiresAt?: string
+  remainingMs?: number
 }
 
 export interface ListNotificationsOptions {
@@ -87,18 +93,26 @@ export function addNotification(input: AddNotificationInput): NotificationRecord
   }
 
   const cursor = nextCursor()
+  const title = input.title ?? (input.type === "quest_expired" ? "Quest expiring soon" : "Notification")
+  const body = input.body ?? (input.type === "quest_expired" ? `Quest "${input.questId ?? ""}" is expiring soon.` : "")
+  const resourceHref = input.resourceHref ?? (input.questId ? `/?quest=${encodeURIComponent(input.questId)}` : "/")
+  const resourceLabel = input.resourceLabel ?? input.questId ?? "Quest"
+
   const notification: NotificationRecord = {
     id: `${agentId}-${cursor}`,
     cursor,
     agentId,
     type: input.type,
-    title: input.title,
-    body: input.body,
-    resourceHref: input.resourceHref,
-    resourceLabel: input.resourceLabel,
+    title,
+    body,
+    resourceHref,
+    resourceLabel,
     createdAt: input.createdAt ?? new Date().toISOString(),
     readAt: null,
     ...(input.dedupeKey ? { dedupeKey: input.dedupeKey } : {}),
+    ...(input.questId ? { questId: input.questId } : {}),
+    ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
+    ...(input.remainingMs !== undefined ? { remainingMs: input.remainingMs } : {}),
   }
 
   notifications.push(notification)
@@ -138,6 +152,35 @@ export function markAllNotificationsRead(agentId: string, readAt = new Date().to
     }
   }
   return markedRead
+}
+
+export function markNotificationRead(
+  agentId: string,
+  notificationId: string,
+  readAt = new Date().toISOString(),
+): boolean {
+  const cleanAgentId = agentId.trim()
+  const cleanNotifId = notificationId.trim()
+  const notifications = store.get(cleanAgentId) ?? []
+  const notif = notifications.find(
+    (n) => n.id === cleanNotifId || n.id === `${cleanAgentId}-${cleanNotifId}` || n.cursor === cleanNotifId,
+  )
+  if (!notif) return false
+  notif.readAt = readAt
+  return true
+}
+
+export function listNotifications(
+  agentId: string,
+  options: { type?: NotificationType; unreadOnly?: boolean; since?: string | null; limit?: number } = {},
+): NotificationRecord[] {
+  const cleanAgentId = agentId.trim()
+  const list = store.get(cleanAgentId) ?? []
+  return list
+    .filter((n) => (!options.type || n.type === options.type))
+    .filter((n) => (options.unreadOnly ? n.readAt === null : true))
+    .slice()
+    .reverse()
 }
 
 export function resetNotificationStore(): void {
